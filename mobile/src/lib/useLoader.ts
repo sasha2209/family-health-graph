@@ -20,7 +20,7 @@ export function useLoader<T>(load: () => Promise<T>) {
       setError(null);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
-        await signOut(); // token was revoked or the account deleted elsewhere
+        await signOut({ revoke: false }); // session expired, revoked, or the account was deleted
         return;
       }
       setError(e instanceof Error ? e.message : String(e));

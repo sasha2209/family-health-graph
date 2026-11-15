@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { parseInviteToken } from '../src/lib/api.ts';
+import { parseInviteToken } from '../src/lib/inviteLink.ts';
 
 const T = 'Abc123_-xyzXYZ0987654321abcdEFGH';
 

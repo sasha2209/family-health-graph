@@ -2,6 +2,7 @@ fastapi>=0.115
 uvicorn>=0.30
 pydantic>=2.7
 cryptography>=42
+pyjwt>=2.8          # Sign in with Apple / Google token verification
 anthropic>=0.40   # optional: AI plain-language summaries
 # dev
 pytest>=8

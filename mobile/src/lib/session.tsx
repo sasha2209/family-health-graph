@@ -37,7 +37,8 @@ interface Session {
   token: string | null;
   api: Api;
   signIn: (token: string) => Promise<void>;
-  signOut: () => Promise<void>;
+  /** Sign out of this device. Revokes the session on the server unless it's already invalid. */
+  signOut: (options?: { revoke?: boolean }) => Promise<void>;
 }
 
 const SessionContext = createContext<Session | null>(null);
@@ -51,7 +52,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = useCallback(async (t: string) => { await tokenStore.set(t); setToken(t); }, []);
-  const signOut = useCallback(async () => { await tokenStore.clear(); setToken(null); }, []);
+  const signOut = useCallback(async ({ revoke = true }: { revoke?: boolean } = {}) => {
+    if (revoke && token) await createApi(token).logout().catch(() => undefined);
+    await tokenStore.clear();
+    setToken(null);
+  }, [token]);
   const api = useMemo(() => createApi(token), [token]);
 
   const value = useMemo(() => ({ ready, token, api, signIn, signOut }), [ready, token, api, signIn, signOut]);

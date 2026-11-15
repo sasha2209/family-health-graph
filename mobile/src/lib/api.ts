@@ -1,6 +1,12 @@
+import { Platform } from 'react-native';
+
 import type {
   AcceptResult,
   AppNotification,
+  AuthConfig,
+  DeviceSession,
+  Me,
+  SignInResult,
   Consent,
   CreatedInvite,
   FamilyLink,
@@ -53,6 +59,10 @@ async function request<T>(path: string, { method = 'GET', body, token }: Options
   return data as T;
 }
 
+/** Shown in the "signed-in devices" list so people can recognise a lost phone. */
+export const DEVICE_NAME =
+  Platform.OS === 'ios' ? 'iPhone' : Platform.OS === 'android' ? 'Android phone' : 'Web browser';
+
 /** API bound to the signed-in user's token. */
 export function createApi(token: string | null) {
   const authed = <T,>(path: string, opts: Omit<Options, 'token'> = {}) => request<T>(path, { ...opts, token });
@@ -83,6 +93,18 @@ export function createApi(token: string | null) {
     consents: () => authed<{ consents: Consent[] }>('/v1/consents'),
     setConsent: (scope: string, granted: boolean) =>
       authed<unknown>('/v1/consents', { method: 'POST', body: { scope, granted } }),
+    // Sign-in. With a token these attach the sign-in method to the current account.
+    emailVerify: (email: string, code: string) =>
+      authed<SignInResult>('/v1/auth/email/verify', { method: 'POST', body: { email, code, device: DEVICE_NAME } }),
+    appleSignIn: (idToken: string, nonce: string) =>
+      authed<SignInResult>('/v1/auth/oidc/apple', {
+        method: 'POST', body: { id_token: idToken, nonce, device: DEVICE_NAME },
+      }),
+    me: () => authed<Me>('/v1/auth/me'),
+    sessions: () => authed<DeviceSession[]>('/v1/auth/sessions'),
+    revokeSession: (id: string) => authed<void>(`/v1/auth/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    logout: () => authed<void>('/v1/auth/logout', { method: 'POST' }),
+
     exportFhir: () => authed<Record<string, unknown>>('/v1/export/fhir'),
     deleteAccount: () => authed<void>('/v1/me', { method: 'DELETE' }),
   };
@@ -92,20 +114,15 @@ export type Api = ReturnType<typeof createApi>;
 
 // Endpoints that work without an account.
 export const publicApi = {
-  createAccount: () => request<{ user_id: string; token: string }>('/v1/users', { method: 'POST' }),
+  createAccount: () =>
+    request<{ user_id: string; token: string }>('/v1/users', { method: 'POST', body: { device: DEVICE_NAME } }),
+  authConfig: () => request<AuthConfig>('/v1/auth/config'),
+  emailStart: (email: string) =>
+    request<{ sent: boolean; expires_in_minutes: number }>('/v1/auth/email/start', { method: 'POST', body: { email } }),
   previewInvite: (inviteToken: string) => request<InvitePreview>(`/v1/invites/${encodeURIComponent(inviteToken)}`),
   declineInvite: (inviteToken: string) =>
     request<void>(`/v1/invites/${encodeURIComponent(inviteToken)}/decline`, { method: 'POST' }),
   sampleRecord: () => request<unknown>('/sample/fhir'),
 };
 
-/**
- * Pull the invite token out of anything a user might paste or open:
- * https://host/invite/TOKEN, familyhealth://invite/TOKEN, or the bare token.
- */
-export function parseInviteToken(input: string): string | null {
-  const text = input.trim();
-  const match = text.match(/invite\/([A-Za-z0-9_-]{20,})/);
-  if (match) return match[1];
-  return /^[A-Za-z0-9_-]{20,}$/.test(text) ? text : null;
-}
+export { parseInviteToken } from './inviteLink';

@@ -1,7 +1,9 @@
-import { Alert, Platform, Share, Switch, View } from 'react-native';
+import { router } from 'expo-router';
 import { useState } from 'react';
+import { Alert, Platform, Share, Switch, View } from 'react-native';
 
-import { Body, Button, Card, Chips, ErrorText, Field, H2, Loading, Screen, styles } from '../../components/ui';
+import { AppleSignIn } from '../../components/AppleSignIn';
+import { Banner, Body, Button, Card, Chips, ErrorText, Field, H2, Loading, Screen, styles } from '../../components/ui';
 import { API_URL } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { usePalette } from '../../lib/theme';
@@ -10,33 +12,85 @@ import { useLoader } from '../../lib/useLoader';
 
 const AI_SCOPE = 'ai_summary';
 
-function confirmDestructive(title: string, message: string, onOk: () => void) {
+function confirmDestructive(title: string, message: string, onOk: () => void, okText = 'Delete') {
   if (Platform.OS === 'web') {
     if (globalThis.confirm?.(`${title}\n\n${message}`)) onOk();
     return;
   }
   Alert.alert(title, message, [
     { text: 'Cancel', style: 'cancel' },
-    { text: 'Delete', style: 'destructive', onPress: onOk },
+    { text: okText, style: 'destructive', onPress: onOk },
   ]);
+}
+
+const PROVIDER_LABEL = { email: 'Email', apple: 'Apple', google: 'Google' } as const;
+
+function ago(iso: string): string {
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 2) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  return hours < 48 ? `${hours} h ago` : `${Math.round(hours / 24)} days ago`;
 }
 
 export default function SettingsScreen() {
   const c = usePalette();
   const { api, signOut } = useSession();
   const { data, error, reload } = useLoader(async () => {
-    const [profile, consents] = await Promise.all([api.profile(false), api.consents()]);
-    return { profile, ai: consents.consents.some((x) => x.scope === AI_SCOPE && x.active) };
+    const [profile, consents, me, sessions] = await Promise.all([
+      api.profile(false), api.consents(), api.me(), api.sessions()]);
+    return { profile, me, sessions, ai: consents.consents.some((x) => x.scope === AI_SCOPE && x.active) };
   });
   const [birth, setBirth] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
   if (!data) return <Screen>{error ? <ErrorText>{error}</ErrorText> : <Loading />}</Screen>;
-  const { profile, ai } = data;
+  const { profile, ai, me, sessions } = data;
   const birthValue = birth ?? profile.birth_date ?? '';
 
   return (
     <Screen>
+      <Card>
+        <H2>Account</H2>
+        {me.secured ? (
+          me.identities.map((i) => (
+            <Body key={i.provider + (i.email ?? '')}>
+              Signed in with {PROVIDER_LABEL[i.provider]}{i.email ? `: ${i.email}` : ''}
+            </Body>
+          ))
+        ) : (
+          <Banner tone="high">
+            Your account isn’t protected yet. If you lose this phone, your data can’t be recovered.
+            Add your email to sign in on other devices.
+          </Banner>
+        )}
+        <View style={[styles.row, { flexDirection: 'column', alignItems: 'stretch' }]}>
+          {!me.identities.some((i) => i.provider === 'email') && (
+            <Button title="Add your email" variant={me.secured ? 'secondary' : 'primary'}
+              onPress={() => router.push({ pathname: '/sign-in', params: { mode: 'link' } })} />
+          )}
+          {!me.identities.some((i) => i.provider === 'apple') && (
+            <AppleSignIn link onDone={() => reload()} onError={setMsg} />
+          )}
+        </View>
+      </Card>
+
+      <Card>
+        <H2>Signed-in devices</H2>
+        {sessions.map((d) => (
+          <View key={d.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+                                    gap: 8, marginTop: 10 }}>
+            <View style={{ flex: 1 }}>
+              <Body>{d.device ?? 'Unknown device'}{d.current ? ' (this device)' : ''}</Body>
+              <Body muted style={{ fontSize: 13 }}>Last active {ago(d.last_used_at)}</Body>
+            </View>
+            {!d.current && (
+              <Button title="Sign out" onPress={async () => { await api.revokeSession(d.id); reload(); }} />
+            )}
+          </View>
+        ))}
+      </Card>
+
       <Card>
         <H2>About you</H2>
         <Body muted>Used for age- and sex-specific guidance.</Body>
@@ -83,13 +137,16 @@ export default function SettingsScreen() {
         <View style={styles.row}>
           <Button title="Sign out of this device" onPress={() => confirmDestructive(
             'Sign out?',
-            'This device has no other copy of your sign-in. Until account recovery is added, signing out means you lose access to this account.',
-            signOut,
+            me.secured
+              ? 'You can sign back in with your email or Apple ID.'
+              : 'Your account has no email or Apple ID, so you won’t be able to sign back in. Add your email first to keep your data.',
+            () => signOut(),
+            'Sign out',
           )} />
           <Button title="Delete all my data" variant="danger" onPress={() => confirmDestructive(
             'Delete everything?',
             'Your record, linked relatives and history will be permanently deleted. This cannot be undone.',
-            async () => { await api.deleteAccount(); await signOut(); },
+            async () => { await api.deleteAccount(); await signOut({ revoke: false }); },
           )} />
         </View>
       </Card>

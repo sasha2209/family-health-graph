@@ -7,13 +7,14 @@ iOS and Android app for Family Health Graph, built with **Expo SDK 58**, **React
 
 | Tab / screen | What it does |
 |---|---|
-| **Welcome** | Create a private account, or paste an invite link a relative sent |
+| **Welcome** | Continue with email, Sign in with Apple (iOS, when enabled), try without an account, or paste an invite link |
+| **Sign in** | Email → 6-digit code (iOS can autofill it from Mail). Also adds an email to an existing account |
 | **Insights** | Guideline-based insights with evidence and sources, family alerts, plain-language summary, pull to refresh |
 | **Family** | Pedigree cards (with *Linked* badges for relatives who joined), linked relatives, per-relative sharing controls, unlink |
 | **Invite** | Pick the relationship and what you share, then send the link through the phone's share sheet |
 | **Add history** (modal) | Type family history in plain sentences, check what was understood, save; load a sample record |
 | **Invite link** (`/invite/[token]`) | See who invited you and what they share, choose what you share, accept or decline |
-| **Settings** | Sex and date of birth, AI-summary consent, FHIR export, sign out, delete all data |
+| **Settings** | Account protection (add email / Apple), signed-in devices with remote sign-out, sex and date of birth, AI-summary consent, FHIR export, sign out, delete all data |
 
 Security: the API token is stored in the iOS Keychain / Android Keystore (`expo-secure-store`,
 *this device only*, so it's excluded from backups). No health data is stored on the device.
@@ -36,7 +37,14 @@ npm install
 EXPO_PUBLIC_API_URL=http://<your-computer-ip>:8000 npx expo start
 ```
 
-Scan the QR code with **Expo Go** (iOS/Android). Everything in v0.1 runs in Expo Go; no native build is needed yet.
+Scan the QR code with **Expo Go** (iOS/Android). Everything runs in Expo Go; no native build is needed yet.
+
+**Sign-in codes in development** are printed in the backend's terminal (look for `DEV EMAIL`). Set
+`FHG_EMAIL_BACKEND=smtp` and the SMTP variables to send real emails.
+
+**Sign in with Apple** needs an Apple Developer account: enable the capability for your bundle ID,
+set `FHG_APPLE_AUDIENCES=<your bundle id>` on the server, and use a development build
+(Expo Go is signed with Expo's bundle ID, so its tokens won't match yours).
 
 **Browser preview** (handy for quick UI work):
 
@@ -66,7 +74,7 @@ production domain (`ios.associatedDomains` and `android.intentFilters` in `app.j
 
 ## Next steps (in order)
 
-1. **Real sign-in and account recovery** (Sign in with Apple / Google). Today a lost device means a lost account; the app warns before signing out.
+1. ~~Sign-in and account recovery~~ (email codes and Apple are done; Google needs `expo-auth-session` and OAuth client IDs).
 2. **Push notifications** for family alerts: add a backend `POST /v1/devices` endpoint and send pushes where the backend calls `notify()`. Keep health details out of the lock-screen text.
 3. **Apple Health Records import** (HealthKit clinical records → FHIR → `POST /v1/ingest/fhir`) and a SMART on FHIR "connect your patient portal" flow. These need a development build (`npx expo run:ios` or `eas build --profile development`).
 4. Universal/App Links, an app lock (Face ID / fingerprint), app icon and splash artwork, then TestFlight / Play internal testing via EAS.

@@ -25,8 +25,9 @@ function RootStack() {
       <Stack.Protected guard={!token} redirectTo="/">
         <Stack.Screen name="welcome" options={{ headerShown: false }} />
       </Stack.Protected>
-      {/* Reachable signed in or out: invite links open here. */}
+      {/* Reachable signed in or out: invite links open here, and sign-in also links an email. */}
       <Stack.Screen name="invite/[token]" options={{ title: 'Family invitation' }} />
+      <Stack.Screen name="sign-in" options={{ title: 'Sign in' }} />
     </Stack>
   );
 }
