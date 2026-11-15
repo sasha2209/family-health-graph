@@ -489,6 +489,9 @@ def record_gaps(p: HealthProfile) -> Optional[Insight]:
         questions.append("Add what you know about your grandparents on both sides.")
     if not p.birth_date or not p.sex:
         questions.append("Add your date of birth and sex so age- and sex-specific guidance can apply.")
+    if not any(m.linked for m in p.family):
+        questions.insert(0, "Invite a parent or sibling to add their own history. When they share it, "
+                            "your insights update automatically, and theirs do too.")
 
     if not questions:
         return None
