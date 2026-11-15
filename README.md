@@ -22,7 +22,7 @@ is in **[mobile/](mobile/README.md)**.
 cd family-health-graph
 pip install -r requirements.txt
 python -m fhg            # http://127.0.0.1:8000  (dashboard)  ·  /docs (OpenAPI)
-python -m pytest -q      # 103 tests
+python -m pytest -q      # 110 tests
 ```
 
 In the dashboard, click **Import sample FHIR record**, then **Use sample text** → **Add to my
@@ -78,7 +78,7 @@ The growth loop: relatives join and enrich each other's insights.
 - **Accept**: the relative sees a preview with no health data, then accepts as a new or existing user. The relationship is inverted automatically (you invited your *mother*, so she sees her *daughter*) and can be corrected.
 - **Sharing is per side and revocable**: `none`, `conditions` (their own diagnoses), or `conditions_and_tree` (also the family history they've recorded, re-expressed from your point of view: your mother's sister becomes your maternal aunt, but ambiguous cases such as "my mother's daughter" are never guessed).
 - **Live, not copied**: shared data is merged into an *effective profile* each time insights are generated, so changing sharing, unlinking or deleting an account takes effect immediately.
-- **Family alerts**: when someone adds a result that runs in families (BRCA variant, Lynch syndrome, familial hypercholesterolemia, malignant hyperthermia), linked relatives who can see it are notified.
+- **Family alerts**: when someone adds a result that runs in families (BRCA variant, Lynch syndrome, familial hypercholesterolemia, malignant hyperthermia), linked relatives who can see it are notified in the app and by push notification. Push text is always generic ("A relative shared a health update that may affect you"), because it shows on lock screens and passes through Apple, Google and Expo; the details appear only inside the app. Dead device tokens are pruned automatically. See `fhg/push.py`.
 - **Stays in the family**: relatives' shared data feeds only your insights. It is never included in partner payloads, FHIR exports or research exports.
 - Known limitation: when a shared relative might be the same person you already recorded (e.g. two unnamed maternal aunts with different conditions), they are kept separate rather than guessed together.
 
@@ -119,6 +119,7 @@ Design principles:
 | `GET /v1/invites/{token}` · `POST …/accept` · `POST …/decline` | Invite preview and response (public; accepting can create an account) |
 | `GET /v1/links` · `PUT /v1/links/{id}` · `DELETE /v1/links/{id}` | Linked relatives, what you share, unlink |
 | `GET /v1/notifications` · `POST /v1/notifications/read` | Family alerts |
+| `PUT /v1/devices/push` · `GET /v1/devices/push` · `DELETE /v1/devices/push` | Register this device's Expo push token (tied to the session, so signing out stops pushes) |
 | `GET /v1/profile?include_linked=true` | Your record plus what relatives share |
 | `GET /v1/export/fhir` | Data portability (FHIR bundle; your own data only) |
 | `GET /v1/ingests` · `GET /v1/audit` | Provenance and audit trail |
@@ -138,6 +139,7 @@ Design principles:
 | `FHG_EMAIL_BACKEND` | `console` | `console` prints sign-in emails to the server log; `smtp` sends them using `FHG_SMTP_HOST`, `FHG_SMTP_PORT`, `FHG_SMTP_USERNAME`, `FHG_SMTP_PASSWORD`, `FHG_EMAIL_FROM` |
 | `FHG_APPLE_AUDIENCES` | unset (off) | Your iOS bundle ID (and web Services ID) to enable Sign in with Apple |
 | `FHG_GOOGLE_AUDIENCES` | unset (off) | Your Google OAuth client IDs to enable Sign in with Google |
+| `FHG_PUSH_BACKEND` | `console` | `console` logs pushes; `expo` sends through Expo's push service (`FHG_EXPO_ACCESS_TOKEN` optional, for Expo's enhanced push security) |
 | `FHG_CORS_ORIGINS` | unset | Comma-separated browser origins allowed to call the API (e.g. the Expo web preview) |
 | `FHG_HOST`, `FHG_PORT` | `127.0.0.1`, `8000` | Use `FHG_HOST=0.0.0.0` so a phone on your network can reach the dev server |
 

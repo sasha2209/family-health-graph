@@ -5,6 +5,7 @@ import { Alert, Platform, Share, Switch, View } from 'react-native';
 import { AppleSignIn } from '../../components/AppleSignIn';
 import { Banner, Body, Button, Card, Chips, ErrorText, Field, H2, Loading, Screen, styles } from '../../components/ui';
 import { API_URL } from '../../lib/api';
+import { enablePush, pushSupport } from '../../lib/push';
 import { useSession } from '../../lib/session';
 import { usePalette } from '../../lib/theme';
 import type { Sex } from '../../lib/types';
@@ -37,15 +38,17 @@ export default function SettingsScreen() {
   const c = usePalette();
   const { api, signOut } = useSession();
   const { data, error, reload } = useLoader(async () => {
-    const [profile, consents, me, sessions] = await Promise.all([
-      api.profile(false), api.consents(), api.me(), api.sessions()]);
-    return { profile, me, sessions, ai: consents.consents.some((x) => x.scope === AI_SCOPE && x.active) };
+    const [profile, consents, me, sessions, pushState] = await Promise.all([
+      api.profile(false), api.consents(), api.me(), api.sessions(), api.pushStatus()]);
+    return { profile, me, sessions, push: pushState.registered,
+             ai: consents.consents.some((x) => x.scope === AI_SCOPE && x.active) };
   });
   const [birth, setBirth] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
   if (!data) return <Screen>{error ? <ErrorText>{error}</ErrorText> : <Loading />}</Screen>;
-  const { profile, ai, me, sessions } = data;
+  const { profile, ai, me, sessions, push } = data;
+  const support = pushSupport();
   const birthValue = birth ?? profile.birth_date ?? '';
 
   return (
@@ -89,6 +92,35 @@ export default function SettingsScreen() {
             )}
           </View>
         ))}
+      </Card>
+
+      <Card>
+        <H2>Notifications</H2>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <View style={{ flex: 1 }}>
+            <Body>Family alerts</Body>
+            <Body muted style={{ fontSize: 13 }}>
+              {support.ok
+                ? 'When a relative joins or shares a result that runs in families. Notifications never show health details.'
+                : support.reason}
+            </Body>
+          </View>
+          <Switch
+            accessibilityLabel="Family alerts"
+            value={push}
+            disabled={!support.ok}
+            trackColor={{ true: c.accent, false: c.border }}
+            onValueChange={async (on) => {
+              if (on) {
+                const ok = await enablePush(api).catch(() => false);
+                if (!ok) setMsg('Notifications are turned off for this app in your phone’s settings.');
+              } else {
+                await api.unregisterPush();
+              }
+              reload();
+            }}
+          />
+        </View>
       </Card>
 
       <Card>

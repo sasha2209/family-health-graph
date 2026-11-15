@@ -20,7 +20,7 @@ with a family member, not with third parties.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional
 
 from .merge import find_match, merge_conditions
 from .models import Condition, FamilyMember, HealthProfile, Relationship as R
@@ -178,11 +178,13 @@ def cascade_categories(profile: HealthProfile) -> set[str]:
 
 
 def notify_cascade(store: Store, user_id: str, categories: set[str],
-                   only_relative: Optional[str] = None) -> int:
+                   only_relative: Optional[str] = None,
+                   notify: Optional[Callable[[str, str, str], None]] = None) -> int:
     """Tell linked relatives (who can see this user's conditions) about a
     result that runs in families. Returns the number of notifications sent."""
     if not categories:
         return 0
+    notify = notify or store.notify
     sent = 0
     names = ", ".join(sorted(CONCEPTS_BY_CATEGORY[c].display for c in categories))
     for link in store.links_for(user_id):
@@ -190,7 +192,7 @@ def notify_cascade(store: Store, user_id: str, categories: set[str],
             continue
         if only_relative and link["relative_id"] != only_relative:
             continue
-        store.notify(
+        notify(
             link["relative_id"], "family_cascade",
             f"Your {_label(link['i_am'])} shared a result that can run in families ({names}). "
             "Your insights have been updated. This may affect what screening or testing is right "

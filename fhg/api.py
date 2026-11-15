@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from . import auth
+from . import auth, push
 from .family_links import (
     SHARE_LEVELS,
     cascade_categories,
@@ -146,6 +146,11 @@ class OidcIn(DeviceIn):
     nonce: Optional[str] = Field(None, max_length=256)
 
 
+class PushTokenIn(BaseModel):
+    token: str = Field(..., max_length=200)
+    platform: Optional[str] = Field(None, pattern="^(ios|android|web)$")
+
+
 class ShareIn(BaseModel):
     share_level: str = Field(..., pattern="^(" + "|".join(SHARE_LEVELS) + ")$")
 
@@ -156,7 +161,9 @@ def _dump(model: Any) -> Any:
 
 def create_app(settings: Optional[Settings] = None,
                email_sender: Optional[auth.EmailSender] = None,
-               oidc_key_resolver: Optional[auth.KeyResolver] = None) -> FastAPI:
+               oidc_key_resolver: Optional[auth.KeyResolver] = None,
+               push_sender: Optional[push.PushSender] = None,
+               push_in_background: bool = True) -> FastAPI:
     settings = settings or Settings.from_env()
     email_sender = email_sender or auth.email_sender_from_env()
     if settings.auth_secret == Settings.auth_secret:
@@ -169,6 +176,7 @@ def create_app(settings: Optional[Settings] = None,
                     "generate guideline-based, explainable preventive-care insights.",
     )
     app.state.store = store
+    notifier = push.Notifier(store, push_sender or push.push_sender_from_env(), background=push_in_background)
     if settings.cors_origins:
         app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins),
                            allow_methods=["*"], allow_headers=["Authorization", "Content-Type"])
@@ -204,7 +212,7 @@ def create_app(settings: Optional[Settings] = None,
             store.save_profile(profile)
         event_id = store.record_ingest(user_id, source, raw, stats)
         store.audit(user_id, "user", f"ingest.{source}", {"event_id": event_id, **stats})
-        notified = notify_cascade(store, user_id, cascade_categories(profile) - before)
+        notified = notify_cascade(store, user_id, cascade_categories(profile) - before, notify=notifier.notify)
         if notified:
             store.audit(user_id, "system", "family.cascade_notified", {"relatives": notified})
         return {"preview": False, "ingest_id": event_id, "merged": stats,
@@ -581,15 +589,15 @@ def create_app(settings: Optional[Settings] = None,
         )
         store.audit(user_id, "user", "family.link_accepted", {"link_id": link_id})
         store.audit(inv["inviter_id"], "system", "family.link_created", {"link_id": link_id})
-        store.notify(inv["inviter_id"], "invitation_accepted",
+        notifier.notify(inv["inviter_id"], "invitation_accepted",
                      f"Your {inv['relationship'].replace('_', ' ')} accepted your invitation"
                      + ("" if body.share_level != "none" else " but isn't sharing their history yet")
                      + ". Your insights now include what they share.")
         # Results already on file that run in families should reach the new relative.
         notify_cascade(store, inv["inviter_id"], cascade_categories(store.get_profile(inv["inviter_id"])),
-                       only_relative=user_id)
+                       only_relative=user_id, notify=notifier.notify)
         notify_cascade(store, user_id, cascade_categories(store.get_profile(user_id)),
-                       only_relative=inv["inviter_id"])
+                       only_relative=inv["inviter_id"], notify=notifier.notify)
         result = {"link_id": link_id, "they_are_your": inviter_to_me.value,
                   "you_share": body.share_level}
         if new_token:
@@ -619,7 +627,7 @@ def create_app(settings: Optional[Settings] = None,
                     {"link_id": link_id, "share_level": body.share_level})
         if link["i_share"] == "none" and body.share_level != "none":
             notify_cascade(store, user_id, cascade_categories(store.get_profile(user_id)),
-                           only_relative=link["relative_id"])
+                           only_relative=link["relative_id"], notify=notifier.notify)
         return {"link_id": link_id, "you_share": body.share_level}
 
     @app.delete("/v1/links/{link_id}", status_code=204)
@@ -627,6 +635,21 @@ def create_app(settings: Optional[Settings] = None,
         if not store.delete_link(link_id, user_id):
             raise HTTPException(404, "No such link")
         store.audit(user_id, "user", "family.unlinked", {"link_id": link_id})
+
+    @app.put("/v1/devices/push")
+    def register_push(body: PushTokenIn, session: dict = Depends(current_session)) -> dict:
+        if not push.EXPO_TOKEN_RE.match(body.token):
+            raise HTTPException(422, "Not an Expo push token")
+        store.register_push_token(body.token, session["user_id"], session["id"], body.platform)
+        return {"registered": True}
+
+    @app.get("/v1/devices/push")
+    def push_status(session: dict = Depends(current_session)) -> dict:
+        return {"registered": store.push_registered(session["id"])}
+
+    @app.delete("/v1/devices/push", status_code=204)
+    def unregister_push(session: dict = Depends(current_session)) -> None:
+        store.unregister_push_for_session(session["id"])
 
     @app.get("/v1/notifications")
     def notifications(user_id: str = Depends(current_user)) -> list[dict]:
