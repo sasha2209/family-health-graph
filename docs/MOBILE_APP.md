@@ -1,5 +1,9 @@
 # Turning Family Health Graph into a Mobile App
 
+> **Status:** the React Native + Expo app (step 2, weeks 1–4 below) has been started in
+> [`mobile/`](../mobile/README.md): screens, secure token storage, and the full invite flow.
+> Sign-in, push notifications and health-record import are next.
+
 The backend is already API-first: every feature, including invitations, is a JSON endpoint,
 so a mobile app is a new client, not a rewrite. The recommended path has two steps.
 

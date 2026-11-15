@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
@@ -39,6 +40,9 @@ class Settings:
     key_file: str = "data/dev.key"
     admin_key: Optional[str] = None
     pseudonym_secret: str = "dev-pseudonym-secret"
+    # Browser origins allowed to call the API (e.g. the Expo web preview at
+    # http://localhost:8081). Native mobile apps don't need this.
+    cors_origins: tuple[str, ...] = ()
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -48,6 +52,7 @@ class Settings:
             key_file=os.environ.get("FHG_KEY_FILE", cls.key_file),
             admin_key=os.environ.get("FHG_ADMIN_KEY"),
             pseudonym_secret=os.environ.get("FHG_PSEUDONYM_SECRET", cls.pseudonym_secret),
+            cors_origins=tuple(o.strip() for o in os.environ.get("FHG_CORS_ORIGINS", "").split(",") if o.strip()),
         )
 
 
@@ -125,6 +130,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     "generate guideline-based, explainable preventive-care insights.",
     )
     app.state.store = store
+    if settings.cors_origins:
+        app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins),
+                           allow_methods=["*"], allow_headers=["Authorization", "Content-Type"])
     valid_scopes = {CONSENT_LLM, CONSENT_RESEARCH} | {share_scope(p) for p in PARTNERS}
 
     def optional_user(authorization: Optional[str] = Header(None)) -> Optional[str]:

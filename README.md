@@ -11,7 +11,8 @@ cardiovascular risk checks.
 
 For how this grows through partnerships with existing companies, see
 **[docs/PARTNERSHIP_STRATEGY.md](docs/PARTNERSHIP_STRATEGY.md)**. For the path to iOS and
-Android apps, see **[docs/MOBILE_APP.md](docs/MOBILE_APP.md)**.
+Android apps, see **[docs/MOBILE_APP.md](docs/MOBILE_APP.md)**; the app itself (Expo / React Native)
+is in **[mobile/](mobile/README.md)**.
 
 ---
 
@@ -21,7 +22,7 @@ Android apps, see **[docs/MOBILE_APP.md](docs/MOBILE_APP.md)**.
 cd family-health-graph
 pip install -r requirements.txt
 python -m fhg            # http://127.0.0.1:8000  (dashboard)  ·  /docs (OpenAPI)
-python -m pytest -q      # 83 tests
+python -m pytest -q      # 84 tests
 ```
 
 In the dashboard, click **Import sample FHIR record**, then **Use sample text** → **Add to my
@@ -128,6 +129,8 @@ Design principles:
 | `FHG_ADMIN_KEY` | unset (research export disabled) | |
 | `FHG_PSEUDONYM_SECRET` | dev value | HMAC key for research IDs |
 | `ANTHROPIC_API_KEY`, `FHG_LLM_MODEL` | unset, `claude-opus-5-5` | Optional AI summaries |
+| `FHG_CORS_ORIGINS` | unset | Comma-separated browser origins allowed to call the API (e.g. the Expo web preview) |
+| `FHG_HOST`, `FHG_PORT` | `127.0.0.1`, `8000` | Use `FHG_HOST=0.0.0.0` so a phone on your network can reach the dev server |
 
 ## Before this touches real patients
 
@@ -137,7 +140,7 @@ This is a working prototype, not a medical device. Before any real use:
 3. **Production hardening**: real identity (OIDC, SMART on FHIR app launch), Postgres with row-level security, KMS-managed keys, rate limiting, a security review and pen test, backups, and accessibility review.
 
 ## Roadmap
-- Mobile apps ([docs/MOBILE_APP.md](docs/MOBILE_APP.md)): HealthKit / Health Connect import, push family alerts, invite deep links.
+- Mobile app ([mobile/](mobile/README.md)): v0.1 is built; next are sign-in and recovery, push family alerts, HealthKit / Health Connect import, and invite deep links.
 - Email/SMS delivery of invitations (today the user shares the link themselves).
 - SMART on FHIR "connect your patient portal" and payer Patient Access API connectors.
 - Risk models (CanRisk/BOADICEA, PREVENT) alongside rule flags; pedigree visualisation.
