@@ -5,6 +5,7 @@ import { Alert, Platform, Share, Switch, View } from 'react-native';
 import { AppleSignIn } from '../../components/AppleSignIn';
 import { Banner, Body, Button, Card, Chips, ErrorText, Field, H2, Loading, Screen, styles } from '../../components/ui';
 import { API_URL } from '../../lib/api';
+import { useAppLock } from '../../lib/appLock';
 import { enablePush, pushSupport } from '../../lib/push';
 import { useSession } from '../../lib/session';
 import { usePalette } from '../../lib/theme';
@@ -37,6 +38,7 @@ function ago(iso: string): string {
 export default function SettingsScreen() {
   const c = usePalette();
   const { api, signOut } = useSession();
+  const lock = useAppLock();
   const { data, error, reload } = useLoader(async () => {
     const [profile, consents, me, sessions, pushState] = await Promise.all([
       api.profile(false), api.consents(), api.me(), api.sessions(), api.pushStatus()]);
@@ -122,6 +124,26 @@ export default function SettingsScreen() {
           />
         </View>
       </Card>
+
+      {lock.available && (
+        <Card>
+          <H2>App lock</H2>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <View style={{ flex: 1 }}>
+              <Body>Require Face ID or fingerprint</Body>
+              <Body muted style={{ fontSize: 13 }}>
+                When you open the app, and after 30 seconds away.
+              </Body>
+            </View>
+            <Switch
+              accessibilityLabel="Require Face ID or fingerprint"
+              value={lock.enabled}
+              trackColor={{ true: c.accent, false: c.border }}
+              onValueChange={(on) => { lock.setEnabled(on); }}
+            />
+          </View>
+        </Card>
+      )}
 
       <Card>
         <H2>About you</H2>

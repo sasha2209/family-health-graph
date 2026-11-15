@@ -14,10 +14,13 @@ iOS and Android app for Family Health Graph, built with **Expo SDK 58**, **React
 | **Invite** | Pick the relationship and what you share, then send the link through the phone's share sheet |
 | **Add history** (modal) | Type family history in plain sentences, check what was understood, save; load a sample record |
 | **Invite link** (`/invite/[token]`) | See who invited you and what they share, choose what you share, accept or decline |
-| **Settings** | Account protection (add email / Apple), signed-in devices with remote sign-out, family alerts on/off, sex and date of birth, AI-summary consent, FHIR export, sign out, delete all data |
+| **Settings** | Account protection (add email / Apple), signed-in devices with remote sign-out, family alerts on/off, Face ID / fingerprint app lock, sex and date of birth, AI-summary consent, FHIR export, sign out, delete all data |
 
 Security: the API token is stored in the iOS Keychain / Android Keystore (`expo-secure-store`,
-*this device only*, so it's excluded from backups). No health data is stored on the device.
+*this device only*, so it's excluded from backups). No health data is stored on the device. An
+optional **app lock** (Face ID / Touch ID / fingerprint, with passcode fallback) asks on launch and
+after 30 seconds away, and a **privacy cover** hides the app's content whenever it isn't in the
+foreground, so health information doesn't appear in the app switcher.
 
 ## Run it
 
@@ -70,20 +73,25 @@ npm run typecheck && npx expo lint && npm test
 
 ## Invite links
 
-The backend returns `https://<server>/invite/<token>` links. Today:
-- In the app, paste the link on the Welcome screen, or open `familyhealth://invite/<token>` in a development build.
-- Without the app, the same link opens the web invite page served by the backend.
+The backend returns `https://<FHG_PUBLIC_URL>/invite/<token>` links.
 
-To make tapped links open the app directly, set up **Universal Links / App Links** for your
-production domain (`ios.associatedDomains` and `android.intentFilters` in `app.json`, plus the
-`apple-app-site-association` and `assetlinks.json` files on the server).
+- **Without the app**, the link opens the web invite page served by the backend, which also offers
+  an "Open this invitation in the app" link (`familyhealth://invite/<token>`).
+- **With the app**, you can always paste the link on the Welcome screen.
+- **Tapped links open the app directly** once Universal Links / App Links are set up for your domain:
+  1. Build with `EXPO_PUBLIC_LINK_DOMAIN=app.example.org` (see `app.config.js`; this adds
+     `applinks:` for iOS and a verified `/invite/` intent filter for Android).
+  2. On the server set `FHG_PUBLIC_URL=https://app.example.org`, `FHG_IOS_APP_IDS=<TEAMID>.com.example.familyhealthgraph`,
+     `FHG_ANDROID_PACKAGE=com.example.familyhealthgraph` and `FHG_ANDROID_CERT_SHA256=<signing cert fingerprint>`.
+     The backend then serves `/.well-known/apple-app-site-association` and `/.well-known/assetlinks.json`.
 
 ## Next steps (in order)
 
 1. ~~Sign-in and account recovery~~ (email codes and Apple are done; Google needs `expo-auth-session` and OAuth client IDs).
 2. ~~Push notifications for family alerts~~ (done; needs an EAS project ID and a physical device to try).
 3. **Apple Health Records import** (HealthKit clinical records → FHIR → `POST /v1/ingest/fhir`) and a SMART on FHIR "connect your patient portal" flow. These need a development build (`npx expo run:ios` or `eas build --profile development`).
-4. Universal/App Links, an app lock (Face ID / fingerprint), app icon and splash artwork, then TestFlight / Play internal testing via EAS.
+4. ~~Universal/App Links and app lock~~ (done; links need your domain and signing details).
+5. App icon and splash artwork, real bundle IDs instead of `com.example.*`, then TestFlight / Play internal testing via EAS.
 
 See [`../docs/MOBILE_APP.md`](../docs/MOBILE_APP.md) for the full plan and app store requirements.
 

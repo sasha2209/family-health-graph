@@ -2,6 +2,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { AppLockProvider } from '../lib/appLock';
 import { usePushNotifications } from '../lib/push';
 import { SessionProvider, useSession } from '../lib/session';
 import { usePalette } from '../lib/theme';
@@ -13,6 +14,7 @@ function RootStack() {
   if (!ready) return null; // keep the splash screen up until we know if there's a session
 
   return (
+    <AppLockProvider active={!!token}>
     <Stack
       screenOptions={{
         headerStyle: { backgroundColor: c.surface },
@@ -31,6 +33,7 @@ function RootStack() {
       <Stack.Screen name="invite/[token]" options={{ title: 'Family invitation' }} />
       <Stack.Screen name="sign-in" options={{ title: 'Sign in' }} />
     </Stack>
+    </AppLockProvider>
   );
 }
 
