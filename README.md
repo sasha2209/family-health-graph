@@ -25,6 +25,8 @@ python -m fhg            # http://127.0.0.1:8000  (dashboard)  ·  /docs (OpenAP
 python -m pytest -q      # 110 tests
 ```
 
+CI (`.github/workflows/ci.yml`) runs the backend tests and the mobile app's typecheck, lint and tests on every pull request.
+
 In the dashboard, click **Import sample FHIR record**, then **Use sample text** → **Add to my
 record**. The text describes the same family, so it is merged and de-duplicated rather than
 added twice.
