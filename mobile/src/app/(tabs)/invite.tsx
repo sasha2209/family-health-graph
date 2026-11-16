@@ -3,6 +3,7 @@ import { Share, View } from 'react-native';
 
 import { Body, Button, Card, Chips, ErrorText, Field, H2, Screen, styles } from '../../components/ui';
 import { INVITE_RELATIONSHIPS, label, SHARE_OPTIONS } from '../../lib/format';
+import { enablePush, pushSupport } from '../../lib/push';
 import { useSession } from '../../lib/session';
 import type { CreatedInvite, ShareLevel } from '../../lib/types';
 
@@ -15,6 +16,7 @@ export default function InviteScreen() {
   const [created, setCreated] = useState<CreatedInvite | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [alertsOn, setAlertsOn] = useState(false);
 
   async function shareLink(invite: CreatedInvite) {
     // Android ignores `url`, so the link also goes in the message text.
@@ -79,7 +81,13 @@ export default function InviteScreen() {
           </Body>
           <View style={styles.row}>
             <Button title="Share again" onPress={() => shareLink(created)} />
+            {pushSupport().ok && !alertsOn && (
+              <Button title="Notify me when they join" onPress={async () => {
+                setAlertsOn(await enablePush(api).catch(() => false));
+              }} />
+            )}
           </View>
+          {alertsOn && <Body muted style={{ marginTop: 6 }}>We’ll let you know when they join.</Body>}
         </Card>
       )}
     </Screen>

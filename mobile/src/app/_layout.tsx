@@ -2,12 +2,14 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { usePushNotifications } from '../lib/push';
 import { SessionProvider, useSession } from '../lib/session';
 import { usePalette } from '../lib/theme';
 
 function RootStack() {
-  const { ready, token } = useSession();
+  const { ready, token, api } = useSession();
   const c = usePalette();
+  usePushNotifications(api, !!token);
   if (!ready) return null; // keep the splash screen up until we know if there's a session
 
   return (

@@ -101,6 +101,10 @@ export function createApi(token: string | null) {
         method: 'POST', body: { id_token: idToken, nonce, device: DEVICE_NAME },
       }),
     me: () => authed<Me>('/v1/auth/me'),
+    registerPush: (token: string, platform: 'ios' | 'android') =>
+      authed<{ registered: boolean }>('/v1/devices/push', { method: 'PUT', body: { token, platform } }),
+    pushStatus: () => authed<{ registered: boolean }>('/v1/devices/push'),
+    unregisterPush: () => authed<void>('/v1/devices/push', { method: 'DELETE' }),
     sessions: () => authed<DeviceSession[]>('/v1/auth/sessions'),
     revokeSession: (id: string) => authed<void>(`/v1/auth/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     logout: () => authed<void>('/v1/auth/logout', { method: 'POST' }),

@@ -45,6 +45,16 @@ CREATE TABLE IF NOT EXISTS identities (
     PRIMARY KEY (provider, subject)
 );
 CREATE INDEX IF NOT EXISTS idx_identities_user ON identities(user_id);
+-- Push tokens belong to a session, so signing a device out stops its pushes.
+CREATE TABLE IF NOT EXISTS push_devices (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    platform TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_push_user ON push_devices(user_id);
 CREATE TABLE IF NOT EXISTS login_codes (
     id TEXT PRIMARY KEY,
     email_key TEXT NOT NULL,
@@ -222,6 +232,32 @@ class Store:
         if n:
             self.audit(user_id, "user", "session.revoked", {"session_id": session_id})
         return n == 1
+
+    # --- push devices --------------------------------------------------------------
+    def register_push_token(self, token: str, user_id: str, session_id: str, platform: Optional[str]) -> None:
+        """A token identifies one app install; if another account registered it
+        before (e.g. someone else signed in on this phone), it moves here."""
+        now = _now()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO push_devices (token, user_id, session_id, platform, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(token) DO UPDATE SET user_id = excluded.user_id, "
+                "session_id = excluded.session_id, platform = excluded.platform, updated_at = excluded.updated_at",
+                (token, user_id, session_id, platform, now, now))
+
+    def push_tokens_for(self, user_id: str) -> list[str]:
+        return [r["token"] for r in self._query("SELECT token FROM push_devices WHERE user_id = ?", (user_id,))]
+
+    def push_registered(self, session_id: str) -> bool:
+        return bool(self._query("SELECT 1 FROM push_devices WHERE session_id = ?", (session_id,)))
+
+    def unregister_push_for_session(self, session_id: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM push_devices WHERE session_id = ?", (session_id,))
+
+    def remove_push_tokens(self, tokens: list[str]) -> None:
+        with self._lock, self._conn:
+            self._conn.executemany("DELETE FROM push_devices WHERE token = ?", [(t,) for t in tokens])
 
     # --- sign-in identities ----------------------------------------------------
     def user_for_identity(self, provider: str, subject: str) -> Optional[str]:
