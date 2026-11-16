@@ -51,6 +51,21 @@
   .side { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
   #status { min-height: 20px; }
   .disclaimer { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  select, input[type=text] { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border);
+           background: var(--bg); color: var(--text); max-width: 100%; }
+  label { display: block; font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .full { width: 100%; }
+  .linked-badge { display: inline-block; font-size: 10px; font-weight: 600; text-transform: uppercase;
+           letter-spacing: .04em; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px;
+           padding: 0 4px; margin-left: 4px; vertical-align: 1px; }
+  .invite-link { word-break: break-all; font-size: 13px; background: var(--bg); border: 1px solid var(--border);
+           border-radius: 8px; padding: 8px; margin-top: 8px; }
+  .link-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;
+           padding: 8px 0; border-top: 1px solid var(--border); font-size: 13px; }
+  .link-row:first-child { border-top: 0; }
+  .note { border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; font-size: 14px;
+          background: var(--info-bg); border-left: 4px solid var(--info); }
+  .note.family_cascade { background: var(--high-bg); border-color: var(--high); }
 </style>
 </head>
 <body>
@@ -79,9 +94,41 @@
       <h2>Your family</h2>
       <div id="family" class="family"><span class="muted">No relatives yet.</span></div>
     </section>
+    <section style="margin-top:16px">
+      <h2>Invite family</h2>
+      <p class="muted" style="margin-top:0">Relatives who join can share their own history, so both of your insights get more accurate.</p>
+      <label for="inv-rel">They are your</label>
+      <select id="inv-rel" class="full">
+        <option value="mother">Mother</option><option value="father">Father</option>
+        <option value="sister">Sister</option><option value="brother">Brother</option>
+        <option value="daughter">Daughter</option><option value="son">Son</option>
+        <option value="maternal_grandmother">Maternal grandmother</option><option value="maternal_grandfather">Maternal grandfather</option>
+        <option value="paternal_grandmother">Paternal grandmother</option><option value="paternal_grandfather">Paternal grandfather</option>
+        <option value="maternal_aunt">Maternal aunt</option><option value="maternal_uncle">Maternal uncle</option>
+        <option value="paternal_aunt">Paternal aunt</option><option value="paternal_uncle">Paternal uncle</option>
+        <option value="cousin">Cousin</option>
+      </select>
+      <label for="inv-name">Your first name (shown to them)</label>
+      <input type="text" id="inv-name" class="full" maxlength="60" placeholder="e.g. Priya">
+      <label for="inv-msg">Message (optional)</label>
+      <input type="text" id="inv-msg" class="full" maxlength="500" placeholder="Can you add what you know about your side?">
+      <label for="inv-share">You'll share with them</label>
+      <select id="inv-share" class="full">
+        <option value="conditions">My conditions</option>
+        <option value="conditions_and_tree">My conditions and family tree</option>
+        <option value="none">Nothing for now</option>
+      </select>
+      <div class="row"><button class="primary" id="create-invite">Create invite link</button></div>
+      <div id="invite-out"></div>
+    </section>
+    <section style="margin-top:16px">
+      <h2>Linked relatives</h2>
+      <div id="links"><span class="muted">No one yet. Invite a relative above.</span></div>
+    </section>
   </div>
   <section>
     <h2>Insights</h2>
+    <div id="notes"></div>
     <div id="insights"><span class="muted">Add some history to see insights.</span></div>
     <p id="disclaimer" class="disclaimer"></p>
   </section>
@@ -120,7 +167,7 @@ function renderFamily(profile) {
     : ["mother","father","sister","brother","son","daughter"].includes(r) ? "Immediate" : "Other";
   $("family").innerHTML = fam.map((m) => `
     <div class="person"><span class="side">${side(m.relationship)}</span>
-      <strong>${esc(m.relationship.replace(/_/g, " "))}${m.name ? " · " + esc(m.name) : ""}${m.deceased ? " †" : ""}</strong>
+      <strong>${esc(m.relationship.replace(/_/g, " "))}${m.name ? " · " + esc(m.name) : ""}${m.deceased ? " †" : ""}${m.linked ? '<span class="linked-badge">Linked</span>' : ""}</strong>
       ${m.conditions.length ? m.conditions.map((c) => `${esc(c.name)}${c.onset_age != null ? ` (${c.age_estimated ? "~" : ""}${c.onset_age})` : ""}`).join("<br>")
         : '<span class="muted">No known conditions</span>'}
     </div>`).join("");
@@ -142,10 +189,64 @@ function renderInsights(report) {
     </div>`).join("");
 }
 
-async function refresh() {
-  const [profile, report] = await Promise.all([api("/v1/profile"), api("/v1/insights")]);
-  renderFamily(profile); renderInsights(report);
+const SHARE = { none: "Nothing", conditions: "Conditions", conditions_and_tree: "Conditions + family tree" };
+const label = (r) => r.replace(/_/g, " ");
+
+function renderLinks(links) {
+  if (!links.length) { $("links").innerHTML = '<span class="muted">No one yet. Invite a relative above.</span>'; return; }
+  $("links").innerHTML = links.map((l) => `
+    <div class="link-row">
+      <div><strong style="text-transform:capitalize">${esc(label(l.relationship))}</strong><br>
+        <span class="muted">They share: ${SHARE[l.they_share]}</span></div>
+      <div>
+        <select data-link="${esc(l.link_id)}" aria-label="What you share with your ${esc(label(l.relationship))}">
+          ${Object.entries(SHARE).map(([k, v]) => `<option value="${k}" ${k === l.you_share ? "selected" : ""}>You share: ${v}</option>`).join("")}
+        </select>
+        <button data-unlink="${esc(l.link_id)}">Unlink</button>
+      </div>
+    </div>`).join("");
+  document.querySelectorAll("[data-link]").forEach((el) => el.onchange = async () => {
+    await api(`/v1/links/${el.dataset.link}`, { method: "PUT", body: JSON.stringify({ share_level: el.value }) });
+    status("Sharing updated."); await refresh();
+  });
+  document.querySelectorAll("[data-unlink]").forEach((el) => el.onclick = async () => {
+    if (!confirm("Unlink this relative? Neither of you will see the other's shared history.")) return;
+    await api(`/v1/links/${el.dataset.unlink}`, { method: "DELETE" });
+    status("Unlinked."); await refresh();
+  });
 }
+
+function renderNotes(notes) {
+  const unread = notes.filter((n) => !n.read);
+  $("notes").innerHTML = unread.map((n) => `<div class="note ${esc(n.kind)}">${esc(n.message)}</div>`).join("")
+    + (unread.length ? '<div class="row" style="margin:-4px 0 12px"><button id="dismiss-notes">Dismiss</button></div>' : "");
+  if (unread.length) $("dismiss-notes").onclick = async () => {
+    await api("/v1/notifications/read", { method: "POST" }); await refresh();
+  };
+}
+
+async function refresh() {
+  const [profile, report, links, notes] = await Promise.all([
+    api("/v1/profile?include_linked=true"), api("/v1/insights"), api("/v1/links"), api("/v1/notifications")]);
+  renderFamily(profile); renderInsights(report); renderLinks(links); renderNotes(notes);
+}
+
+$("create-invite").onclick = async () => {
+  try {
+    const r = await api("/v1/invitations", { method: "POST", body: JSON.stringify({
+      relationship: $("inv-rel").value, inviter_name: $("inv-name").value.trim() || null,
+      message: $("inv-msg").value.trim() || null, share_level: $("inv-share").value }) });
+    const rel = $("inv-rel").selectedOptions[0].textContent.toLowerCase();
+    $("invite-out").innerHTML = `<div class="invite-link" id="invite-url">${esc(r.invite_url)}</div>
+      <div class="row"><button id="share-invite" class="primary">${navigator.share ? "Share" : "Copy link"}</button></div>
+      <p class="muted">Send this to your ${esc(rel)}. It works once and expires in 14 days.</p>`;
+    $("share-invite").onclick = async () => {
+      const text = `I'm putting together our family health history. Can you add yours?`;
+      if (navigator.share) { try { await navigator.share({ title: "Family Health Graph", text, url: r.invite_url }); } catch (e) {} }
+      else { await navigator.clipboard.writeText(r.invite_url).catch(() => {}); status("Link copied."); }
+    };
+  } catch (e) { status("Error: " + e.message); }
+};
 
 $("save-text").onclick = async () => {
   const text = $("text").value.trim(); if (!text) return;

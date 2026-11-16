@@ -10,7 +10,8 @@ cardiovascular risk checks.
 > project turns it into structured data that can drive action.
 
 For how this grows through partnerships with existing companies, see
-**[docs/PARTNERSHIP_STRATEGY.md](docs/PARTNERSHIP_STRATEGY.md)**.
+**[docs/PARTNERSHIP_STRATEGY.md](docs/PARTNERSHIP_STRATEGY.md)**. For the path to iOS and
+Android apps, see **[docs/MOBILE_APP.md](docs/MOBILE_APP.md)**.
 
 ---
 
@@ -20,12 +21,17 @@ For how this grows through partnerships with existing companies, see
 cd family-health-graph
 pip install -r requirements.txt
 python -m fhg            # http://127.0.0.1:8000  (dashboard)  ·  /docs (OpenAPI)
-python -m pytest -q      # 59 tests
+python -m pytest -q      # 83 tests
 ```
 
 In the dashboard, click **Import sample FHIR record**, then **Use sample text** → **Add to my
 record**. The text describes the same family, so it is merged and de-duplicated rather than
 added twice.
+
+To try **family invitations**, create an invite link in the "Invite family" panel and open it in a
+*different browser or a private window* (each browser holds one account). Accept, add some
+history as the relative (e.g. "I have a BRCA1 mutation. My sister had colon cancer at 45."),
+then reload the first window.
 
 ## What it does
 
@@ -64,6 +70,16 @@ Terminology normalization (`terminology.py`) maps everything onto canonical conc
 - **Consent** scopes (`share:<partner>`, `ai_summary`, `research_deidentified`) are granted and revoked by the user.
 - **Audit log** of every read, import, share and export. **Right to delete** via `DELETE /v1/me`.
 
+### Family invitations (`fhg/family_links.py`)
+The growth loop: relatives join and enrich each other's insights.
+- **Invite**: `POST /v1/invitations` returns a single-use link (expires in 14 days; only a hash of the token is stored). It can point at an existing relative in your record so their data merges into that entry.
+- **Accept**: the relative sees a preview with no health data, then accepts as a new or existing user. The relationship is inverted automatically (you invited your *mother*, so she sees her *daughter*) and can be corrected.
+- **Sharing is per side and revocable**: `none`, `conditions` (their own diagnoses), or `conditions_and_tree` (also the family history they've recorded, re-expressed from your point of view: your mother's sister becomes your maternal aunt, but ambiguous cases such as "my mother's daughter" are never guessed).
+- **Live, not copied**: shared data is merged into an *effective profile* each time insights are generated, so changing sharing, unlinking or deleting an account takes effect immediately.
+- **Family alerts**: when someone adds a result that runs in families (BRCA variant, Lynch syndrome, familial hypercholesterolemia, malignant hyperthermia), linked relatives who can see it are notified.
+- **Stays in the family**: relatives' shared data feeds only your insights. It is never included in partner payloads, FHIR exports or research exports.
+- Known limitation: when a shared relative might be the same person you already recorded (e.g. two unnamed maternal aunts with different conditions), they are kept separate rather than guessed together.
+
 ### Insights (`fhg/insights/`)
 | Rule | Triggers on (simplified from cited guidance) | Source |
 |---|---|---|
@@ -93,7 +109,12 @@ Design principles:
 | `GET /v1/insights` · `GET /v1/insights/summary` | Insight report / plain-language summary |
 | `GET/POST /v1/consents` | View, grant, revoke consent |
 | `GET /v1/partners` · `POST /v1/partners/{id}/share` | Consent-gated partner sharing |
-| `GET /v1/export/fhir` | Data portability (FHIR bundle) |
+| `POST /v1/invitations` · `GET /v1/invitations` · `DELETE /v1/invitations/{id}` | Invite relatives, list, revoke |
+| `GET /v1/invites/{token}` · `POST …/accept` · `POST …/decline` | Invite preview and response (public; accepting can create an account) |
+| `GET /v1/links` · `PUT /v1/links/{id}` · `DELETE /v1/links/{id}` | Linked relatives, what you share, unlink |
+| `GET /v1/notifications` · `POST /v1/notifications/read` | Family alerts |
+| `GET /v1/profile?include_linked=true` | Your record plus what relatives share |
+| `GET /v1/export/fhir` | Data portability (FHIR bundle; your own data only) |
 | `GET /v1/ingests` · `GET /v1/audit` | Provenance and audit trail |
 | `DELETE /v1/me` | Delete all data |
 | `GET /admin/research/export` | De-identified, consented cohort (needs `X-Admin-Key`) |
@@ -116,7 +137,8 @@ This is a working prototype, not a medical device. Before any real use:
 3. **Production hardening**: real identity (OIDC, SMART on FHIR app launch), Postgres with row-level security, KMS-managed keys, rate limiting, a security review and pen test, backups, and accessibility review.
 
 ## Roadmap
-- **Family invitations**: relatives add their own history (with consent) and enrich each other's insights. This is the core growth loop.
+- Mobile apps ([docs/MOBILE_APP.md](docs/MOBILE_APP.md)): HealthKit / Health Connect import, push family alerts, invite deep links.
+- Email/SMS delivery of invitations (today the user shares the link themselves).
 - SMART on FHIR "connect your patient portal" and payer Patient Access API connectors.
 - Risk models (CanRisk/BOADICEA, PREVENT) alongside rule flags; pedigree visualisation.
 - Clinician-facing view and FHIR `FamilyMemberHistory` write-back / CDS Hooks into the EHR.

@@ -17,7 +17,7 @@ def _condition_key(c: Condition) -> str:
     return c.category or c.name.strip().lower()
 
 
-def _merge_conditions(existing: list[Condition], incoming: list[Condition]) -> int:
+def merge_conditions(existing: list[Condition], incoming: list[Condition]) -> int:
     added = 0
     by_key = {_condition_key(c): c for c in existing}
     for new in incoming:
@@ -42,7 +42,7 @@ def _merge_conditions(existing: list[Condition], incoming: list[Condition]) -> i
     return added
 
 
-def _find_match(family: list[FamilyMember], new: FamilyMember) -> FamilyMember | None:
+def find_match(family: list[FamilyMember], new: FamilyMember) -> FamilyMember | None:
     same_rel = [m for m in family if m.relationship == new.relationship]
     if not same_rel:
         return None
@@ -71,7 +71,7 @@ def merge_into(profile: HealthProfile, fragment: HealthProfile) -> dict:
     if fragment.birth_date and not profile.birth_date:
         profile.birth_date = fragment.birth_date
 
-    stats["conditions"] = _merge_conditions(profile.conditions, fragment.conditions)
+    stats["conditions"] = merge_conditions(profile.conditions, fragment.conditions)
 
     seen_obs = {(o.code, o.value, o.effective_date) for o in profile.observations}
     for o in fragment.observations:
@@ -88,7 +88,7 @@ def merge_into(profile: HealthProfile, fragment: HealthProfile) -> dict:
             stats["medications"] += 1
 
     for new in fragment.family:
-        match = _find_match(profile.family, new)
+        match = find_match(profile.family, new)
         if match is None:
             profile.family.append(new)
             stats["relatives_added"] += 1
@@ -98,7 +98,7 @@ def merge_into(profile: HealthProfile, fragment: HealthProfile) -> dict:
         match.sex = match.sex or new.sex
         match.deceased = match.deceased if match.deceased is not None else new.deceased
         match.age = match.age if match.age is not None else new.age
-        stats["relative_conditions"] += _merge_conditions(match.conditions, new.conditions)
+        stats["relative_conditions"] += merge_conditions(match.conditions, new.conditions)
 
     profile.touch()
     return stats

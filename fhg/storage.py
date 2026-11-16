@@ -11,7 +11,7 @@ import json
 import sqlite3
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -53,6 +53,41 @@ CREATE TABLE IF NOT EXISTS audit_log (
     ts TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
+CREATE TABLE IF NOT EXISTS invitations (
+    id TEXT PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    inviter_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    relationship TEXT NOT NULL,       -- what the invitee is to the inviter
+    member_id TEXT,                   -- inviter's existing record for this relative
+    inviter_share TEXT NOT NULL,      -- what the inviter will share once linked
+    details BLOB NOT NULL,            -- encrypted {inviter_name, message}
+    status TEXT NOT NULL,             -- pending | accepted | declined | revoked
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    responded_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_inv_inviter ON invitations(inviter_id);
+-- One row per direction: owner sees relative as `relationship` and shares
+-- `share_level` of their own data with them.
+CREATE TABLE IF NOT EXISTS family_links (
+    link_id TEXT NOT NULL,
+    owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    relative_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    relationship TEXT NOT NULL,
+    member_id TEXT,
+    share_level TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (link_id, owner_id)
+);
+CREATE INDEX IF NOT EXISTS idx_links_owner ON family_links(owner_id);
+CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    message BLOB NOT NULL,
+    created_at TEXT NOT NULL,
+    read_at TEXT
+);
 """
 
 
@@ -172,6 +207,114 @@ class Store:
         rows = self._query("SELECT actor, action, detail, ts FROM audit_log WHERE user_id = ? ORDER BY id", (user_id,))
         return [{"actor": r["actor"], "action": r["action"],
                  "detail": json.loads(r["detail"] or "{}"), "ts": r["ts"]} for r in rows]
+
+    # --- invitations --------------------------------------------------------
+    def create_invitation(self, inviter_id: str, relationship: str, member_id: Optional[str],
+                          inviter_share: str, inviter_name: Optional[str],
+                          message: Optional[str], ttl_days: int = 14) -> tuple[dict, str]:
+        inv_id, token = uuid.uuid4().hex[:16], new_token()
+        now = datetime.now(timezone.utc)
+        details = self._cipher.encrypt(json.dumps({"inviter_name": inviter_name, "message": message}))
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO invitations (id, token_hash, inviter_id, relationship, member_id, "
+                "inviter_share, details, status, created_at, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
+                (inv_id, hash_token(token), inviter_id, relationship, member_id, inviter_share,
+                 details, now.isoformat(), (now + timedelta(days=ttl_days)).isoformat()),
+            )
+        return self._invitation(inv_id), token
+
+    def _row_to_invitation(self, r: sqlite3.Row) -> dict:
+        details = json.loads(self._cipher.decrypt(r["details"]))
+        status = r["status"]
+        if status == "pending" and datetime.fromisoformat(r["expires_at"]) < datetime.now(timezone.utc):
+            status = "expired"
+        return {"id": r["id"], "inviter_id": r["inviter_id"], "relationship": r["relationship"],
+                "member_id": r["member_id"], "inviter_share": r["inviter_share"],
+                "inviter_name": details.get("inviter_name"), "message": details.get("message"),
+                "status": status, "created_at": r["created_at"], "expires_at": r["expires_at"],
+                "responded_at": r["responded_at"]}
+
+    def _invitation(self, inv_id: str) -> Optional[dict]:
+        rows = self._query("SELECT * FROM invitations WHERE id = ?", (inv_id,))
+        return self._row_to_invitation(rows[0]) if rows else None
+
+    def invitation_by_token(self, token: str) -> Optional[dict]:
+        rows = self._query("SELECT * FROM invitations WHERE token_hash = ?", (hash_token(token),))
+        return self._row_to_invitation(rows[0]) if rows else None
+
+    def invitations_for(self, inviter_id: str) -> list[dict]:
+        rows = self._query("SELECT * FROM invitations WHERE inviter_id = ? ORDER BY created_at DESC",
+                           (inviter_id,))
+        return [self._row_to_invitation(r) for r in rows]
+
+    def set_invitation_status(self, inv_id: str, status: str, only_if_pending: bool = True) -> bool:
+        sql = "UPDATE invitations SET status = ?, responded_at = ? WHERE id = ?"
+        if only_if_pending:
+            sql += " AND status = 'pending'"
+        with self._lock, self._conn:
+            return self._conn.execute(sql, (status, _now(), inv_id)).rowcount == 1
+
+    # --- family links -------------------------------------------------------------
+    def create_link(self, a: str, b: str, *, b_to_a: str, a_member_id: Optional[str], a_share: str,
+                    a_to_b: str, b_member_id: Optional[str], b_share: str) -> str:
+        """Link users a and b. ``b_to_a`` is what b is to a (as a sees it)."""
+        link_id, now = uuid.uuid4().hex[:16], _now()
+        with self._lock, self._conn:
+            self._conn.executemany(
+                "INSERT INTO family_links (link_id, owner_id, relative_id, relationship, member_id, "
+                "share_level, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [(link_id, a, b, b_to_a, a_member_id, a_share, now),
+                 (link_id, b, a, a_to_b, b_member_id, b_share, now)],
+            )
+        return link_id
+
+    def links_for(self, owner_id: str) -> list[dict]:
+        """Each link as seen by ``owner_id``, including what the other side shares."""
+        rows = self._query(
+            "SELECT mine.link_id, mine.relative_id, mine.relationship, mine.member_id, "
+            "mine.share_level AS i_share, theirs.share_level AS they_share, "
+            "theirs.relationship AS i_am, mine.created_at "
+            "FROM family_links mine JOIN family_links theirs "
+            "ON theirs.link_id = mine.link_id AND theirs.owner_id = mine.relative_id "
+            "WHERE mine.owner_id = ? ORDER BY mine.created_at", (owner_id,))
+        return [dict(r) for r in rows]
+
+    def are_linked(self, a: str, b: str) -> bool:
+        return bool(self._query("SELECT 1 FROM family_links WHERE owner_id = ? AND relative_id = ?", (a, b)))
+
+    def set_share_level(self, link_id: str, owner_id: str, level: str) -> bool:
+        with self._lock, self._conn:
+            return self._conn.execute(
+                "UPDATE family_links SET share_level = ? WHERE link_id = ? AND owner_id = ?",
+                (level, link_id, owner_id)).rowcount == 1
+
+    def delete_link(self, link_id: str, owner_id: str) -> bool:
+        with self._lock, self._conn:
+            if not self._conn.execute("SELECT 1 FROM family_links WHERE link_id = ? AND owner_id = ?",
+                                      (link_id, owner_id)).fetchone():
+                return False
+            self._conn.execute("DELETE FROM family_links WHERE link_id = ?", (link_id,))
+        return True
+
+    # --- notifications ------------------------------------------------------------
+    def notify(self, user_id: str, kind: str, message: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO notifications (user_id, kind, message, created_at) VALUES (?, ?, ?, ?)",
+                (user_id, kind, self._cipher.encrypt(message), _now()))
+
+    def notifications(self, user_id: str) -> list[dict]:
+        rows = self._query("SELECT id, kind, message, created_at, read_at FROM notifications "
+                           "WHERE user_id = ? ORDER BY id DESC", (user_id,))
+        return [{"id": r["id"], "kind": r["kind"], "message": self._cipher.decrypt(r["message"]),
+                 "created_at": r["created_at"], "read": r["read_at"] is not None} for r in rows]
+
+    def mark_notifications_read(self, user_id: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL",
+                               (_now(), user_id))
 
     # --- deletion ----------------------------------------------------------
     def delete_user(self, user_id: str) -> None:

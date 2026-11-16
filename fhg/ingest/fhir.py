@@ -51,6 +51,9 @@ ROLE_CODES: dict[str, Relationship] = {
     "NIECE": Relationship.NIECE, "NEPHEW": Relationship.NEPHEW,
     "MCOUSN": Relationship.MATERNAL_COUSIN, "PCOUSN": Relationship.PATERNAL_COUSIN,
     "COUSN": Relationship.COUSIN,
+    "PRN": Relationship.PARENT, "CHILD": Relationship.CHILD, "SIB": Relationship.SIBLING,
+    "GRNDDAU": Relationship.GRANDDAUGHTER, "GRNDSON": Relationship.GRANDSON,
+    "GRNDCHILD": Relationship.GRANDCHILD,
 }
 RELATIONSHIP_TO_ROLE: dict[Relationship, str] = {
     Relationship.MOTHER: "MTH", Relationship.FATHER: "FTH",

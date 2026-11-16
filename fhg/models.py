@@ -34,12 +34,18 @@ class Relationship(str, Enum):
     BROTHER = "brother"
     DAUGHTER = "daughter"
     SON = "son"
+    PARENT = "parent"
+    CHILD = "child"
+    SIBLING = "sibling"
     MATERNAL_GRANDMOTHER = "maternal_grandmother"
     MATERNAL_GRANDFATHER = "maternal_grandfather"
     PATERNAL_GRANDMOTHER = "paternal_grandmother"
     PATERNAL_GRANDFATHER = "paternal_grandfather"
     GRANDMOTHER = "grandmother"
     GRANDFATHER = "grandfather"
+    GRANDDAUGHTER = "granddaughter"
+    GRANDSON = "grandson"
+    GRANDCHILD = "grandchild"
     MATERNAL_AUNT = "maternal_aunt"
     MATERNAL_UNCLE = "maternal_uncle"
     PATERNAL_AUNT = "paternal_aunt"
@@ -66,12 +72,18 @@ RELATIONSHIP_META: dict[Relationship, tuple[Optional[int], Optional[str], Option
     Relationship.BROTHER: (1, None, "male"),
     Relationship.DAUGHTER: (1, None, "female"),
     Relationship.SON: (1, None, "male"),
+    Relationship.PARENT: (1, None, None),
+    Relationship.CHILD: (1, None, None),
+    Relationship.SIBLING: (1, None, None),
     Relationship.MATERNAL_GRANDMOTHER: (2, "maternal", "female"),
     Relationship.MATERNAL_GRANDFATHER: (2, "maternal", "male"),
     Relationship.PATERNAL_GRANDMOTHER: (2, "paternal", "female"),
     Relationship.PATERNAL_GRANDFATHER: (2, "paternal", "male"),
     Relationship.GRANDMOTHER: (2, None, "female"),
     Relationship.GRANDFATHER: (2, None, "male"),
+    Relationship.GRANDDAUGHTER: (2, None, "female"),
+    Relationship.GRANDSON: (2, None, "male"),
+    Relationship.GRANDCHILD: (2, None, None),
     Relationship.MATERNAL_AUNT: (2, "maternal", "female"),
     Relationship.MATERNAL_UNCLE: (2, "maternal", "male"),
     Relationship.PATERNAL_AUNT: (2, "paternal", "female"),
@@ -142,6 +154,9 @@ class FamilyMember(BaseModel):
     age: Optional[int] = None  # current age, or age at death
     conditions: list[Condition] = Field(default_factory=list)
     source: str = "manual"
+    # True when (some of) this relative's data comes live from their own linked
+    # account rather than from what the user typed or imported.
+    linked: bool = False
 
     @property
     def degree(self) -> Optional[int]:
@@ -166,8 +181,10 @@ class FamilyMember(BaseModel):
         if self.relationship in (
             Relationship.SISTER,
             Relationship.BROTHER,
+            Relationship.SIBLING,
             Relationship.DAUGHTER,
             Relationship.SON,
+            Relationship.CHILD,
         ):
             return {"maternal", "paternal"}
         return set()

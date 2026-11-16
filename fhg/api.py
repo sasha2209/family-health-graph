@@ -8,10 +8,17 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
+from .family_links import (
+    SHARE_LEVELS,
+    cascade_categories,
+    effective_profile,
+    inverse_relationship,
+    notify_cascade,
+)
 from .ingest import CsvImportError, parse_family_csv, parse_family_history_text, parse_fhir, to_fhir_bundle
 from .insights import generate_insights, summarize
 from .merge import merge_into
@@ -84,6 +91,26 @@ class ConsentIn(BaseModel):
     granted: bool
 
 
+ShareLevel = Field("conditions", pattern="^(" + "|".join(SHARE_LEVELS) + ")$")
+
+
+class InvitationIn(BaseModel):
+    relationship: Optional[Relationship] = None  # what the invitee is to you
+    member_id: Optional[str] = None  # your existing record for this relative
+    inviter_name: Optional[str] = Field(None, max_length=60)
+    message: Optional[str] = Field(None, max_length=500)
+    share_level: str = ShareLevel  # what you will share with them
+
+
+class AcceptIn(BaseModel):
+    share_level: str = ShareLevel  # what you will share with the inviter
+    relationship: Optional[Relationship] = None  # correct what the inviter is to you
+
+
+class ShareIn(BaseModel):
+    share_level: str = Field(..., pattern="^(" + "|".join(SHARE_LEVELS) + ")$")
+
+
 def _dump(model: Any) -> Any:
     return model.model_dump(mode="json")
 
@@ -100,12 +127,17 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     app.state.store = store
     valid_scopes = {CONSENT_LLM, CONSENT_RESEARCH} | {share_scope(p) for p in PARTNERS}
 
-    def current_user(authorization: Optional[str] = Header(None)) -> str:
+    def optional_user(authorization: Optional[str] = Header(None)) -> Optional[str]:
         if not authorization or not authorization.lower().startswith("bearer "):
-            raise HTTPException(401, "Missing bearer token")
+            return None
         user_id = store.user_for_token(authorization[7:].strip())
         if not user_id:
             raise HTTPException(401, "Invalid token")
+        return user_id
+
+    def current_user(user_id: Optional[str] = Depends(optional_user)) -> str:
+        if not user_id:
+            raise HTTPException(401, "Missing bearer token")
         return user_id
 
     def ingest(user_id: str, source: str, raw: str, fragment: HealthProfile,
@@ -114,16 +146,25 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             return {"preview": True, "parsed": _dump(fragment), "warnings": warnings or []}
         with store.write_lock:
             profile = store.get_profile(user_id)
+            before = cascade_categories(profile)
             stats = merge_into(profile, fragment)
             store.save_profile(profile)
         event_id = store.record_ingest(user_id, source, raw, stats)
         store.audit(user_id, "user", f"ingest.{source}", {"event_id": event_id, **stats})
-        return {"preview": False, "ingest_id": event_id, "merged": stats, "warnings": warnings or []}
+        notified = notify_cascade(store, user_id, cascade_categories(profile) - before)
+        if notified:
+            store.audit(user_id, "system", "family.cascade_notified", {"relatives": notified})
+        return {"preview": False, "ingest_id": event_id, "merged": stats,
+                "relatives_notified": notified, "warnings": warnings or []}
 
     # --- UI & meta ---------------------------------------------------------
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     def index() -> str:
         return (PKG_DIR / "static" / "index.html").read_text()
+
+    @app.get("/invite/{token}", response_class=HTMLResponse, include_in_schema=False)
+    def invite_page(token: str) -> str:
+        return (PKG_DIR / "static" / "invite.html").read_text()
 
     @app.get("/sample/{name}", include_in_schema=False)
     def sample(name: str):
@@ -150,9 +191,10 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
     # --- profile -----------------------------------------------------------------
     @app.get("/v1/profile")
-    def get_profile(user_id: str = Depends(current_user)) -> dict:
+    def get_profile(include_linked: bool = Query(False, description="Merge in what linked relatives share"),
+                    user_id: str = Depends(current_user)) -> dict:
         store.audit(user_id, "user", "profile.read")
-        return _dump(store.get_profile(user_id))
+        return _dump(effective_profile(store, user_id) if include_linked else store.get_profile(user_id))
 
     @app.put("/v1/profile/demographics")
     def set_demographics(body: DemographicsIn, user_id: str = Depends(current_user)) -> dict:
@@ -235,13 +277,13 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     # --- insights ------------------------------------------------------------------
     @app.get("/v1/insights")
     def insights(user_id: str = Depends(current_user)) -> dict:
-        report = generate_insights(store.get_profile(user_id))
+        report = generate_insights(effective_profile(store, user_id))
         store.audit(user_id, "system", "insights.generated", {"count": len(report.insights)})
         return _dump(report)
 
     @app.get("/v1/insights/summary")
     def insights_summary(user_id: str = Depends(current_user)) -> dict:
-        report = generate_insights(store.get_profile(user_id))
+        report = generate_insights(effective_profile(store, user_id))
         allow = store.has_consent(user_id, CONSENT_LLM)
         result = summarize(report, allow_llm=allow)
         store.audit(user_id, "system", "insights.summary", {"generated_by": result["generated_by"]})
@@ -291,6 +333,153 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.get("/v1/audit")
     def audit(user_id: str = Depends(current_user)) -> list[dict]:
         return store.audit_log(user_id)
+
+    # --- family invitations & linked relatives ---------------------------------------
+    # Note: partner sharing, FHIR export and research export deliberately use only the
+    # user's own record. Relatives consented to share with family, not third parties.
+
+    def public_invitation(inv: dict) -> dict:
+        return {k: inv[k] for k in ("id", "relationship", "member_id", "inviter_share",
+                                    "inviter_name", "message", "status", "created_at",
+                                    "expires_at", "responded_at")}
+
+    @app.post("/v1/invitations", status_code=201)
+    def create_invitation(body: InvitationIn, request: Request,
+                          user_id: str = Depends(current_user)) -> dict:
+        profile = store.get_profile(user_id)
+        relationship = body.relationship
+        if body.member_id:
+            member = next((m for m in profile.family if m.id == body.member_id), None)
+            if member is None:
+                raise HTTPException(404, "No such relative in your record")
+            relationship = relationship or member.relationship
+        if relationship is None:
+            raise HTTPException(422, "Provide relationship or member_id")
+        pending = [i for i in store.invitations_for(user_id) if i["status"] == "pending"]
+        if len(pending) >= 50:
+            raise HTTPException(429, "Too many pending invitations; revoke some first")
+        inv, token = store.create_invitation(
+            user_id, relationship.value, body.member_id, body.share_level,
+            body.inviter_name, body.message)
+        store.audit(user_id, "user", "invitation.created",
+                    {"invitation_id": inv["id"], "relationship": relationship.value})
+        return {"invitation": public_invitation(inv), "token": token,
+                "invite_url": str(request.base_url).rstrip("/") + f"/invite/{token}",
+                "note": "Send this link to your relative. It works once and expires in 14 days."}
+
+    @app.get("/v1/invitations")
+    def list_invitations(user_id: str = Depends(current_user)) -> list[dict]:
+        return [public_invitation(i) for i in store.invitations_for(user_id)]
+
+    @app.delete("/v1/invitations/{invitation_id}", status_code=204)
+    def revoke_invitation(invitation_id: str, user_id: str = Depends(current_user)) -> None:
+        if not any(i["id"] == invitation_id for i in store.invitations_for(user_id)):
+            raise HTTPException(404, "No such invitation")
+        if not store.set_invitation_status(invitation_id, "revoked"):
+            raise HTTPException(409, "Invitation is no longer pending")
+        store.audit(user_id, "user", "invitation.revoked", {"invitation_id": invitation_id})
+
+    def pending_invitation(token: str) -> dict:
+        inv = store.invitation_by_token(token)
+        if inv is None:
+            raise HTTPException(404, "Invitation not found")
+        if inv["status"] != "pending":
+            raise HTTPException(410, f"Invitation is {inv['status']}")
+        return inv
+
+    @app.get("/v1/invites/{token}")
+    def preview_invite(token: str) -> dict:
+        """Public: what the invitee sees before accepting. Contains no health data."""
+        inv = pending_invitation(token)
+        inviter_sex = store.get_profile(inv["inviter_id"]).sex
+        return {
+            "inviter_name": inv["inviter_name"],
+            "message": inv["message"],
+            "you_are_their": inv["relationship"],
+            "they_are_your": inverse_relationship(
+                Relationship(inv["relationship"]), inviter_sex.value if inviter_sex else None).value,
+            "they_will_share": inv["inviter_share"],
+            "expires_at": inv["expires_at"],
+        }
+
+    @app.post("/v1/invites/{token}/accept")
+    def accept_invite(token: str, body: AcceptIn,
+                      user_id: Optional[str] = Depends(optional_user)) -> dict:
+        inv = pending_invitation(token)
+        new_token = None
+        if user_id is None:
+            user_id, new_token = store.create_user()
+        if user_id == inv["inviter_id"]:
+            raise HTTPException(400, "You can't accept your own invitation")
+        if store.are_linked(user_id, inv["inviter_id"]):
+            raise HTTPException(409, "You are already linked with this relative")
+        if not store.set_invitation_status(inv["id"], "accepted"):
+            raise HTTPException(410, "Invitation is no longer pending")
+
+        inviter_sex = store.get_profile(inv["inviter_id"]).sex
+        inviter_to_me = body.relationship or inverse_relationship(
+            Relationship(inv["relationship"]), inviter_sex.value if inviter_sex else None)
+        link_id = store.create_link(
+            inv["inviter_id"], user_id,
+            b_to_a=inv["relationship"], a_member_id=inv["member_id"], a_share=inv["inviter_share"],
+            a_to_b=inviter_to_me.value, b_member_id=None, b_share=body.share_level,
+        )
+        store.audit(user_id, "user", "family.link_accepted", {"link_id": link_id})
+        store.audit(inv["inviter_id"], "system", "family.link_created", {"link_id": link_id})
+        store.notify(inv["inviter_id"], "invitation_accepted",
+                     f"Your {inv['relationship'].replace('_', ' ')} accepted your invitation"
+                     + ("" if body.share_level != "none" else " but isn't sharing their history yet")
+                     + ". Your insights now include what they share.")
+        # Results already on file that run in families should reach the new relative.
+        notify_cascade(store, inv["inviter_id"], cascade_categories(store.get_profile(inv["inviter_id"])),
+                       only_relative=user_id)
+        notify_cascade(store, user_id, cascade_categories(store.get_profile(user_id)),
+                       only_relative=inv["inviter_id"])
+        result = {"link_id": link_id, "they_are_your": inviter_to_me.value,
+                  "you_share": body.share_level}
+        if new_token:
+            result |= {"user_id": user_id, "token": new_token,
+                       "note": "A new account was created. Store this token securely."}
+        return result
+
+    @app.post("/v1/invites/{token}/decline", status_code=204)
+    def decline_invite(token: str) -> None:
+        inv = pending_invitation(token)
+        store.set_invitation_status(inv["id"], "declined")
+        store.audit(inv["inviter_id"], "system", "invitation.declined", {"invitation_id": inv["id"]})
+
+    @app.get("/v1/links")
+    def list_links(user_id: str = Depends(current_user)) -> list[dict]:
+        return [{"link_id": l["link_id"], "relationship": l["relationship"], "member_id": l["member_id"],
+                 "you_share": l["i_share"], "they_share": l["they_share"], "since": l["created_at"]}
+                for l in store.links_for(user_id)]
+
+    @app.put("/v1/links/{link_id}")
+    def update_link(link_id: str, body: ShareIn, user_id: str = Depends(current_user)) -> dict:
+        link = next((l for l in store.links_for(user_id) if l["link_id"] == link_id), None)
+        if link is None:
+            raise HTTPException(404, "No such link")
+        store.set_share_level(link_id, user_id, body.share_level)
+        store.audit(user_id, "user", "family.share_changed",
+                    {"link_id": link_id, "share_level": body.share_level})
+        if link["i_share"] == "none" and body.share_level != "none":
+            notify_cascade(store, user_id, cascade_categories(store.get_profile(user_id)),
+                           only_relative=link["relative_id"])
+        return {"link_id": link_id, "you_share": body.share_level}
+
+    @app.delete("/v1/links/{link_id}", status_code=204)
+    def delete_link(link_id: str, user_id: str = Depends(current_user)) -> None:
+        if not store.delete_link(link_id, user_id):
+            raise HTTPException(404, "No such link")
+        store.audit(user_id, "user", "family.unlinked", {"link_id": link_id})
+
+    @app.get("/v1/notifications")
+    def notifications(user_id: str = Depends(current_user)) -> list[dict]:
+        return store.notifications(user_id)
+
+    @app.post("/v1/notifications/read", status_code=204)
+    def read_notifications(user_id: str = Depends(current_user)) -> None:
+        store.mark_notifications_read(user_id)
 
     # --- research (admin) -------------------------------------------------------------
     @app.get("/admin/research/export")
