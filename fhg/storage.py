@@ -21,9 +21,40 @@ from .security import FieldCipher, hash_token, new_token
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
-    token_hash TEXT NOT NULL UNIQUE,
     created_at TEXT NOT NULL
 );
+-- One row per signed-in device. Only a hash of the bearer token is stored.
+CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device TEXT,
+    created_at TEXT NOT NULL,
+    last_used_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+-- Ways to sign in to an account. For email, `subject` is a keyed hash of the
+-- address (so it can be looked up) and `email` holds it encrypted for display.
+CREATE TABLE IF NOT EXISTS identities (
+    provider TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    email BLOB,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (provider, subject)
+);
+CREATE INDEX IF NOT EXISTS idx_identities_user ON identities(user_id);
+CREATE TABLE IF NOT EXISTS login_codes (
+    id TEXT PRIMARY KEY,
+    email_key TEXT NOT NULL,
+    code_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    consumed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_codes_email ON login_codes(email_key);
 CREATE TABLE IF NOT EXISTS profiles (
     user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     data BLOB NOT NULL,
@@ -96,6 +127,8 @@ def _now() -> str:
 
 
 class Store:
+    SESSION_DAYS = 90  # sliding: extended whenever the session is used
+
     def __init__(self, path: str | Path, cipher: FieldCipher):
         if str(path) != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -105,6 +138,23 @@ class Store:
         self._conn.executescript(SCHEMA)
         self._cipher = cipher
         self._lock = threading.RLock()
+        self._migrate_legacy_tokens()
+
+    def _migrate_legacy_tokens(self) -> None:
+        """Databases from before sessions existed kept one token per user on the
+        users table. Move those tokens into sessions so existing devices stay
+        signed in, and remember to fill the old NOT NULL column on insert."""
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(users)")}
+        self._legacy_users = "token_hash" in cols
+        if not self._legacy_users:
+            return
+        now = datetime.now(timezone.utc)
+        expires = (now + timedelta(days=self.SESSION_DAYS)).isoformat()
+        with self._conn:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO sessions (id, token_hash, user_id, device, created_at, last_used_at, expires_at) "
+                "SELECT 'legacy-' || id, token_hash, id, 'migrated', created_at, ?, ? FROM users "
+                "WHERE token_hash NOT LIKE 'unused-%'", (now.isoformat(), expires))
 
     def _query(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
         # One connection is shared across worker threads, so reads take the lock too.
@@ -112,20 +162,127 @@ class Store:
             return self._conn.execute(sql, params).fetchall()
 
     # --- users -------------------------------------------------------------
-    def create_user(self) -> tuple[str, str]:
-        user_id, token = uuid.uuid4().hex, new_token()
+    def create_user(self, device: Optional[str] = None) -> tuple[str, str]:
+        """Create an account and a first session; returns (user_id, token)."""
+        user_id = uuid.uuid4().hex
         with self._lock, self._conn:
-            self._conn.execute(
-                "INSERT INTO users (id, token_hash, created_at) VALUES (?, ?, ?)",
-                (user_id, hash_token(token), _now()),
-            )
+            if self._legacy_users:
+                self._conn.execute("INSERT INTO users (id, token_hash, created_at) VALUES (?, ?, ?)",
+                                   (user_id, f"unused-{uuid.uuid4().hex}", _now()))
+            else:
+                self._conn.execute("INSERT INTO users (id, created_at) VALUES (?, ?)", (user_id, _now()))
         self.save_profile(HealthProfile(user_id=user_id))
         self.audit(user_id, "user", "account.created")
+        _, token = self.create_session(user_id, device)
         return user_id, token
 
+    # --- sessions ------------------------------------------------------------
+    def create_session(self, user_id: str, device: Optional[str] = None) -> tuple[str, str]:
+        session_id, token = uuid.uuid4().hex[:16], new_token()
+        now = datetime.now(timezone.utc)
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO sessions (id, token_hash, user_id, device, created_at, last_used_at, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (session_id, hash_token(token), user_id, (device or "")[:80] or None, now.isoformat(),
+                 now.isoformat(), (now + timedelta(days=self.SESSION_DAYS)).isoformat()))
+        self.audit(user_id, "user", "session.created", {"session_id": session_id, "device": device})
+        return session_id, token
+
+    def session_for_token(self, token: str) -> Optional[dict]:
+        rows = self._query("SELECT * FROM sessions WHERE token_hash = ?", (hash_token(token),))
+        if not rows:
+            return None
+        row = rows[0]
+        now = datetime.now(timezone.utc)
+        if datetime.fromisoformat(row["expires_at"]) < now:
+            return None
+        # Slide the expiry, at most once an hour to avoid a write per request.
+        if now - datetime.fromisoformat(row["last_used_at"]) > timedelta(hours=1):
+            with self._lock, self._conn:
+                self._conn.execute("UPDATE sessions SET last_used_at = ?, expires_at = ? WHERE id = ?",
+                                   (now.isoformat(), (now + timedelta(days=self.SESSION_DAYS)).isoformat(),
+                                    row["id"]))
+        return {"id": row["id"], "user_id": row["user_id"]}
+
     def user_for_token(self, token: str) -> Optional[str]:
-        rows = self._query("SELECT id FROM users WHERE token_hash = ?", (hash_token(token),))
-        return rows[0]["id"] if rows else None
+        session = self.session_for_token(token)
+        return session["user_id"] if session else None
+
+    def sessions_for(self, user_id: str) -> list[dict]:
+        rows = self._query("SELECT id, device, created_at, last_used_at, expires_at FROM sessions "
+                           "WHERE user_id = ? AND expires_at > ? ORDER BY last_used_at DESC",
+                           (user_id, _now()))
+        return [dict(r) for r in rows]
+
+    def revoke_session(self, user_id: str, session_id: str) -> bool:
+        with self._lock, self._conn:
+            n = self._conn.execute("DELETE FROM sessions WHERE id = ? AND user_id = ?",
+                                   (session_id, user_id)).rowcount
+        if n:
+            self.audit(user_id, "user", "session.revoked", {"session_id": session_id})
+        return n == 1
+
+    # --- sign-in identities ----------------------------------------------------
+    def user_for_identity(self, provider: str, subject: str) -> Optional[str]:
+        rows = self._query("SELECT user_id FROM identities WHERE provider = ? AND subject = ?",
+                           (provider, subject))
+        return rows[0]["user_id"] if rows else None
+
+    def add_identity(self, user_id: str, provider: str, subject: str, email: Optional[str]) -> bool:
+        """Attach a sign-in method; False if it already belongs to an account."""
+        try:
+            with self._lock, self._conn:
+                self._conn.execute(
+                    "INSERT INTO identities (provider, subject, user_id, email, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (provider, subject, user_id, self._cipher.encrypt(email) if email else None, _now()))
+        except sqlite3.IntegrityError:
+            return False
+        self.audit(user_id, "user", "identity.added", {"provider": provider})
+        return True
+
+    def identities_for(self, user_id: str) -> list[dict]:
+        rows = self._query("SELECT provider, email, created_at FROM identities WHERE user_id = ? "
+                           "ORDER BY created_at", (user_id,))
+        return [{"provider": r["provider"],
+                 "email": self._cipher.decrypt(r["email"]) if r["email"] else None,
+                 "created_at": r["created_at"]} for r in rows]
+
+    # --- one-time email codes ---------------------------------------------------
+    def create_login_code(self, email_key: str, code_hash: str, ttl_minutes: int) -> None:
+        now = datetime.now(timezone.utc)
+        with self._lock, self._conn:
+            # A new code replaces any earlier unused one.
+            self._conn.execute("UPDATE login_codes SET consumed_at = ? WHERE email_key = ? AND consumed_at IS NULL",
+                               (now.isoformat(), email_key))
+            self._conn.execute(
+                "INSERT INTO login_codes (id, email_key, code_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+                (uuid.uuid4().hex, email_key, code_hash, now.isoformat(),
+                 (now + timedelta(minutes=ttl_minutes)).isoformat()))
+
+    def login_codes_since(self, email_key: str, since: datetime) -> int:
+        rows = self._query("SELECT COUNT(*) AS n FROM login_codes WHERE email_key = ? AND created_at > ?",
+                           (email_key, since.isoformat()))
+        return rows[0]["n"]
+
+    def active_login_code(self, email_key: str) -> Optional[dict]:
+        rows = self._query("SELECT id, code_hash, attempts, expires_at FROM login_codes "
+                           "WHERE email_key = ? AND consumed_at IS NULL ORDER BY created_at DESC LIMIT 1",
+                           (email_key,))
+        if not rows or datetime.fromisoformat(rows[0]["expires_at"]) < datetime.now(timezone.utc):
+            return None
+        return dict(rows[0])
+
+    def record_code_attempt(self, code_id: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE login_codes SET attempts = attempts + 1 WHERE id = ?", (code_id,))
+
+    def consume_login_code(self, code_id: str) -> bool:
+        """Single use: only one concurrent request can consume a code."""
+        with self._lock, self._conn:
+            return self._conn.execute(
+                "UPDATE login_codes SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL",
+                (_now(), code_id)).rowcount == 1
 
     @property
     def write_lock(self) -> threading.RLock:

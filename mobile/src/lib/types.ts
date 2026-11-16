@@ -104,3 +104,38 @@ export interface Consent {
   scope: string;
   active: boolean;
 }
+
+export interface AuthConfig {
+  email: boolean;
+  apple: boolean;
+  google: boolean;
+}
+
+export interface SignInResult {
+  user_id: string;
+  new_account: boolean;
+  token?: string; // present when signing in; absent when linking to the current account
+  linked?: boolean;
+  email?: string;
+}
+
+export interface Identity {
+  provider: 'email' | 'apple' | 'google';
+  email: string | null;
+  created_at: string;
+}
+
+export interface Me {
+  user_id: string;
+  session_id: string;
+  secured: boolean;
+  identities: Identity[];
+}
+
+export interface DeviceSession {
+  id: string;
+  device: string | null;
+  created_at: string;
+  last_used_at: string;
+  current: boolean;
+}

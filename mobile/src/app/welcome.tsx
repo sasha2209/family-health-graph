@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { Text, View } from 'react-native';
 
+import { AppleSignIn } from '../components/AppleSignIn';
 import { Body, Button, Card, ErrorText, Field, Screen, styles } from '../components/ui';
 import { parseInviteToken, publicApi } from '../lib/api';
 import { useSession } from '../lib/session';
@@ -51,9 +52,17 @@ export default function Welcome() {
           {'•'} Invite relatives so your family’s history builds itself{'\n'}
           {'•'} You control what’s shared, and can delete everything at any time
         </Body>
-        <View style={styles.row}>
-          <Button title="Get started" variant="primary" onPress={start} busy={busy} />
+        <View style={[styles.row, { flexDirection: 'column', alignItems: 'stretch' }]}>
+          <Button title="Continue with email" variant="primary" onPress={() => router.push('/sign-in')} />
+          <AppleSignIn
+            onDone={async (r) => { if (r.token) await signIn(r.token); }}
+            onError={setError}
+          />
+          <Button title="Try it without an account" onPress={start} busy={busy} />
         </View>
+        <Body muted style={{ fontSize: 13, marginTop: 8 }}>
+          Without an account, only this phone can open your data. You can add an email any time.
+        </Body>
       </Card>
 
       <Card>

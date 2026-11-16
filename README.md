@@ -22,7 +22,7 @@ is in **[mobile/](mobile/README.md)**.
 cd family-health-graph
 pip install -r requirements.txt
 python -m fhg            # http://127.0.0.1:8000  (dashboard)  ·  /docs (OpenAPI)
-python -m pytest -q      # 84 tests
+python -m pytest -q      # 103 tests
 ```
 
 In the dashboard, click **Import sample FHIR record**, then **Use sample text** → **Add to my
@@ -66,7 +66,8 @@ Terminology normalization (`terminology.py`) maps everything onto canonical conc
 
 ### Storage (`fhg/storage.py`, `fhg/security.py`)
 - Health data and raw imported documents are **encrypted at rest** (Fernet, AES + HMAC). The key comes from `FHG_ENCRYPTION_KEY`; use a KMS in production.
-- API tokens are stored as SHA-256 hashes only.
+- **Sign-in**: start without an account, then secure it with a one-time **email code** (or **Sign in with Apple / Google**). Each sign-in is a separate per-device session that expires after 90 days of inactivity and can be revoked from any other device. Email addresses are stored encrypted and looked up by keyed hash; codes are single use, expire in 10 minutes, allow 5 attempts, and are limited to 5 an hour. See `fhg/auth.py`.
+- Session tokens are stored as SHA-256 hashes only.
 - **Provenance**: every import is recorded (source type, merge stats, encrypted original).
 - **Consent** scopes (`share:<partner>`, `ai_summary`, `research_deidentified`) are granted and revoked by the user.
 - **Audit log** of every read, import, share and export. **Right to delete** via `DELETE /v1/me`.
@@ -103,7 +104,11 @@ Design principles:
 
 | Method & path | Purpose |
 |---|---|
-| `POST /v1/users` | Create an account → bearer token |
+| `POST /v1/users` | Create an account without signing in → bearer token |
+| `GET /v1/auth/config` | Which sign-in methods the server offers |
+| `POST /v1/auth/email/start` · `POST /v1/auth/email/verify` | Email a one-time code; verify it to sign in, create an account, or (with a bearer token) add the email to your account |
+| `POST /v1/auth/oidc/{apple,google}` | Sign in with an Apple / Google ID token (or link it to your account) |
+| `GET /v1/auth/me` · `GET /v1/auth/sessions` · `DELETE /v1/auth/sessions/{id}` · `POST /v1/auth/logout` | Account, signed-in devices, sign a device out |
 | `GET /v1/profile` · `PUT /v1/profile/demographics` | Read profile / set sex & birth date |
 | `POST /v1/ingest/fhir` · `/text` · `/csv` (`?preview=true`) | Import data |
 | `POST /v1/family` · `DELETE /v1/family/{id}` · `POST /v1/observations` | Manual entry |
@@ -129,6 +134,10 @@ Design principles:
 | `FHG_ADMIN_KEY` | unset (research export disabled) | |
 | `FHG_PSEUDONYM_SECRET` | dev value | HMAC key for research IDs |
 | `ANTHROPIC_API_KEY`, `FHG_LLM_MODEL` | unset, `claude-opus-5-5` | Optional AI summaries |
+| `FHG_AUTH_SECRET` | dev value | Keys email lookups and sign-in codes; **set a long random value in production** |
+| `FHG_EMAIL_BACKEND` | `console` | `console` prints sign-in emails to the server log; `smtp` sends them using `FHG_SMTP_HOST`, `FHG_SMTP_PORT`, `FHG_SMTP_USERNAME`, `FHG_SMTP_PASSWORD`, `FHG_EMAIL_FROM` |
+| `FHG_APPLE_AUDIENCES` | unset (off) | Your iOS bundle ID (and web Services ID) to enable Sign in with Apple |
+| `FHG_GOOGLE_AUDIENCES` | unset (off) | Your Google OAuth client IDs to enable Sign in with Google |
 | `FHG_CORS_ORIGINS` | unset | Comma-separated browser origins allowed to call the API (e.g. the Expo web preview) |
 | `FHG_HOST`, `FHG_PORT` | `127.0.0.1`, `8000` | Use `FHG_HOST=0.0.0.0` so a phone on your network can reach the dev server |
 
@@ -137,7 +146,7 @@ Design principles:
 This is a working prototype, not a medical device. Before any real use:
 1. **Clinical review** of every rule by clinicians and genetic counselors, a documented review cycle for guideline updates, and validation against real pedigrees (sensitivity/specificity versus established tools such as the Ontario FHAT or the Tyrer-Cuzick/CanRisk models).
 2. **Regulatory review**: FDA software-as-a-medical-device / clinical decision support positioning, HIPAA (when acting as a business associate), the FTC Health Breach Notification Rule, and state health-privacy laws (e.g. Washington's My Health My Data Act).
-3. **Production hardening**: real identity (OIDC, SMART on FHIR app launch), Postgres with row-level security, KMS-managed keys, rate limiting, a security review and pen test, backups, and accessibility review.
+3. **Production hardening**: a transactional email provider for sign-in codes, per-IP rate limiting, SMART on FHIR app launch, Postgres with row-level security, KMS-managed keys, rate limiting, a security review and pen test, backups, and accessibility review.
 
 ## Roadmap
 - Mobile app ([mobile/](mobile/README.md)): v0.1 is built; next are sign-in and recovery, push family alerts, HealthKit / Health Connect import, and invite deep links.

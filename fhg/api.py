@@ -1,10 +1,12 @@
 """HTTP API (FastAPI)."""
 from __future__ import annotations
 
+import hmac
 import json
+import logging
 import os
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -13,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
+from . import auth
 from .family_links import (
     SHARE_LEVELS,
     cascade_categories,
@@ -30,6 +33,7 @@ from .storage import Store
 from .terminology import OBSERVATION_ALIASES, category_from_text
 
 PKG_DIR = Path(__file__).parent
+log = logging.getLogger(__name__)
 MAX_INGEST_BYTES = 5 * 1024 * 1024
 
 
@@ -43,6 +47,11 @@ class Settings:
     # Browser origins allowed to call the API (e.g. the Expo web preview at
     # http://localhost:8081). Native mobile apps don't need this.
     cors_origins: tuple[str, ...] = ()
+    # Keyed hashing for email lookups and sign-in codes. Set a long random value in production.
+    auth_secret: str = "dev-auth-secret"
+    # OIDC audiences: your iOS bundle ID / Services ID for Apple, OAuth client IDs for Google.
+    apple_audiences: tuple[str, ...] = ()
+    google_audiences: tuple[str, ...] = ()
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -52,8 +61,15 @@ class Settings:
             key_file=os.environ.get("FHG_KEY_FILE", cls.key_file),
             admin_key=os.environ.get("FHG_ADMIN_KEY"),
             pseudonym_secret=os.environ.get("FHG_PSEUDONYM_SECRET", cls.pseudonym_secret),
-            cors_origins=tuple(o.strip() for o in os.environ.get("FHG_CORS_ORIGINS", "").split(",") if o.strip()),
+            cors_origins=_csv("FHG_CORS_ORIGINS"),
+            auth_secret=os.environ.get("FHG_AUTH_SECRET", cls.auth_secret),
+            apple_audiences=_csv("FHG_APPLE_AUDIENCES"),
+            google_audiences=_csv("FHG_GOOGLE_AUDIENCES"),
         )
+
+
+def _csv(name: str) -> tuple[str, ...]:
+    return tuple(v.strip() for v in os.environ.get(name, "").split(",") if v.strip())
 
 
 # --- request bodies -------------------------------------------------------------
@@ -112,6 +128,24 @@ class AcceptIn(BaseModel):
     relationship: Optional[Relationship] = None  # correct what the inviter is to you
 
 
+class DeviceIn(BaseModel):
+    device: Optional[str] = Field(None, max_length=80)  # e.g. "iPhone", shown in the devices list
+
+
+class EmailStartIn(BaseModel):
+    email: str = Field(..., max_length=254)
+
+
+class EmailVerifyIn(DeviceIn):
+    email: str = Field(..., max_length=254)
+    code: str = Field(..., pattern=r"^\d{6}$")
+
+
+class OidcIn(DeviceIn):
+    id_token: str = Field(..., max_length=8192)
+    nonce: Optional[str] = Field(None, max_length=256)
+
+
 class ShareIn(BaseModel):
     share_level: str = Field(..., pattern="^(" + "|".join(SHARE_LEVELS) + ")$")
 
@@ -120,8 +154,13 @@ def _dump(model: Any) -> Any:
     return model.model_dump(mode="json")
 
 
-def create_app(settings: Optional[Settings] = None) -> FastAPI:
+def create_app(settings: Optional[Settings] = None,
+               email_sender: Optional[auth.EmailSender] = None,
+               oidc_key_resolver: Optional[auth.KeyResolver] = None) -> FastAPI:
     settings = settings or Settings.from_env()
+    email_sender = email_sender or auth.email_sender_from_env()
+    if settings.auth_secret == Settings.auth_secret:
+        log.warning("FHG_AUTH_SECRET is not set; using a development value. Do not use this in production.")
     store = Store(settings.db_path, load_cipher(settings.encryption_key, Path(settings.key_file)))
     app = FastAPI(
         title="Family Health Graph",
@@ -135,18 +174,24 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                            allow_methods=["*"], allow_headers=["Authorization", "Content-Type"])
     valid_scopes = {CONSENT_LLM, CONSENT_RESEARCH} | {share_scope(p) for p in PARTNERS}
 
-    def optional_user(authorization: Optional[str] = Header(None)) -> Optional[str]:
+    def optional_session(authorization: Optional[str] = Header(None)) -> Optional[dict]:
         if not authorization or not authorization.lower().startswith("bearer "):
             return None
-        user_id = store.user_for_token(authorization[7:].strip())
-        if not user_id:
-            raise HTTPException(401, "Invalid token")
-        return user_id
+        session = store.session_for_token(authorization[7:].strip())
+        if not session:
+            raise HTTPException(401, "Invalid or expired session")
+        return session
 
-    def current_user(user_id: Optional[str] = Depends(optional_user)) -> str:
-        if not user_id:
+    def optional_user(session: Optional[dict] = Depends(optional_session)) -> Optional[str]:
+        return session["user_id"] if session else None
+
+    def current_session(session: Optional[dict] = Depends(optional_session)) -> dict:
+        if not session:
             raise HTTPException(401, "Missing bearer token")
-        return user_id
+        return session
+
+    def current_user(session: dict = Depends(current_session)) -> str:
+        return session["user_id"]
 
     def ingest(user_id: str, source: str, raw: str, fragment: HealthProfile,
                preview: bool, warnings: Optional[list[str]] = None) -> dict:
@@ -188,10 +233,112 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
     # --- accounts --------------------------------------------------------------
     @app.post("/v1/users", status_code=201)
-    def create_user() -> dict:
-        user_id, token = store.create_user()
+    def create_user(body: Optional[DeviceIn] = None) -> dict:
+        """Anonymous account (try the app without signing in). Add an email or
+        Apple/Google sign-in later via /v1/auth/* to secure it."""
+        user_id, token = store.create_user(body.device if body else None)
         return {"user_id": user_id, "token": token,
-                "note": "Store this token securely; it cannot be recovered."}
+                "note": "Store this token securely. Add a sign-in method so the account can be recovered."}
+
+    # --- sign-in -------------------------------------------------------------------
+    def complete_sign_in(provider: str, subject: str, email: Optional[str],
+                         current: Optional[str], device: Optional[str]) -> dict:
+        owner = store.user_for_identity(provider, subject)
+        if current:
+            # Already signed in: attach this sign-in method to the current account.
+            if owner and owner != current:
+                raise HTTPException(409, "That sign-in already belongs to a different account. "
+                                         "Sign out first if you want to use that account.")
+            if owner is None and not store.add_identity(current, provider, subject, email):
+                raise HTTPException(409, "That sign-in already belongs to a different account.")
+            return {"user_id": current, "linked": True, "new_account": False}
+        if owner:
+            _, token = store.create_session(owner, device)
+            store.audit(owner, "user", f"auth.sign_in.{provider}")
+            return {"user_id": owner, "token": token, "new_account": False}
+        user_id, token = store.create_user(device)
+        if not store.add_identity(user_id, provider, subject, email):
+            # Lost a race with a concurrent first sign-in: use the account that won.
+            store.delete_user(user_id)
+            owner = store.user_for_identity(provider, subject)
+            _, token = store.create_session(owner, device)
+            return {"user_id": owner, "token": token, "new_account": False}
+        return {"user_id": user_id, "token": token, "new_account": True}
+
+    @app.get("/v1/auth/config")
+    def auth_config() -> dict:
+        """Which sign-in methods this server offers (so apps can show the right buttons)."""
+        return {"email": True, "apple": bool(settings.apple_audiences),
+                "google": bool(settings.google_audiences)}
+
+    @app.post("/v1/auth/email/start")
+    def email_start(body: EmailStartIn) -> dict:
+        try:
+            email = auth.normalize_email(body.email)
+        except auth.AuthError as exc:
+            raise HTTPException(exc.status, str(exc)) from exc
+        key = auth.email_key(settings.auth_secret, email)
+        since = datetime.now(timezone.utc) - timedelta(hours=1)
+        if store.login_codes_since(key, since) >= auth.MAX_CODES_PER_HOUR:
+            raise HTTPException(429, "Too many codes requested for this address. Try again in an hour.")
+        code = auth.new_code()
+        store.create_login_code(key, auth.code_hash(settings.auth_secret, key, code), auth.CODE_TTL_MINUTES)
+        subject, text = auth.code_email(code)
+        try:
+            email_sender.send(email, subject, text)
+        except Exception as exc:
+            log.exception("sending sign-in email failed")
+            raise HTTPException(502, "We couldn't send the email. Please try again.") from exc
+        # Same answer whether or not the address has an account.
+        return {"sent": True, "expires_in_minutes": auth.CODE_TTL_MINUTES}
+
+    @app.post("/v1/auth/email/verify")
+    def email_verify(body: EmailVerifyIn, user_id: Optional[str] = Depends(optional_user)) -> dict:
+        try:
+            email = auth.normalize_email(body.email)
+        except auth.AuthError as exc:
+            raise HTTPException(exc.status, str(exc)) from exc
+        key = auth.email_key(settings.auth_secret, email)
+        record = store.active_login_code(key)
+        if record is None or record["attempts"] >= auth.MAX_CODE_ATTEMPTS:
+            raise HTTPException(400, "That code has expired or was already used. Request a new one.")
+        if not hmac.compare_digest(record["code_hash"], auth.code_hash(settings.auth_secret, key, body.code)):
+            store.record_code_attempt(record["id"])
+            left = auth.MAX_CODE_ATTEMPTS - record["attempts"] - 1
+            raise HTTPException(400, f"Incorrect code. {left} attempt{'s' if left != 1 else ''} left."
+                                if left > 0 else "Incorrect code. Request a new one.")
+        if not store.consume_login_code(record["id"]):
+            raise HTTPException(400, "That code has expired or was already used. Request a new one.")
+        return complete_sign_in("email", key, email, user_id, body.device) | {"email": email}
+
+    @app.post("/v1/auth/oidc/{provider}")
+    def oidc_sign_in(provider: str, body: OidcIn, user_id: Optional[str] = Depends(optional_user)) -> dict:
+        audiences = {"apple": settings.apple_audiences, "google": settings.google_audiences}.get(provider, ())
+        try:
+            subject, email = auth.verify_id_token(provider, body.id_token, audiences, body.nonce,
+                                                  oidc_key_resolver)
+        except auth.AuthError as exc:
+            raise HTTPException(exc.status, str(exc)) from exc
+        return complete_sign_in(provider, subject, email, user_id, body.device)
+
+    @app.get("/v1/auth/me")
+    def auth_me(session: dict = Depends(current_session)) -> dict:
+        identities = store.identities_for(session["user_id"])
+        return {"user_id": session["user_id"], "session_id": session["id"],
+                "secured": bool(identities), "identities": identities}
+
+    @app.get("/v1/auth/sessions")
+    def list_sessions(session: dict = Depends(current_session)) -> list[dict]:
+        return [s | {"current": s["id"] == session["id"]} for s in store.sessions_for(session["user_id"])]
+
+    @app.delete("/v1/auth/sessions/{session_id}", status_code=204)
+    def revoke_session(session_id: str, session: dict = Depends(current_session)) -> None:
+        if not store.revoke_session(session["user_id"], session_id):
+            raise HTTPException(404, "No such session")
+
+    @app.post("/v1/auth/logout", status_code=204)
+    def logout(session: dict = Depends(current_session)) -> None:
+        store.revoke_session(session["user_id"], session["id"])
 
     @app.delete("/v1/me", status_code=204)
     def delete_me(user_id: str = Depends(current_user)) -> None:
