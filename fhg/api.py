@@ -52,6 +52,12 @@ class Settings:
     # OIDC audiences: your iOS bundle ID / Services ID for Apple, OAuth client IDs for Google.
     apple_audiences: tuple[str, ...] = ()
     google_audiences: tuple[str, ...] = ()
+    # Public origin used in invite links, e.g. https://app.example.org (defaults to the request host).
+    public_url: Optional[str] = None
+    # Universal Links / App Links: "TEAMID.bundle.id" for iOS; package + signing-cert SHA-256s for Android.
+    ios_app_ids: tuple[str, ...] = ()
+    android_package: Optional[str] = None
+    android_cert_sha256: tuple[str, ...] = ()
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -65,6 +71,10 @@ class Settings:
             auth_secret=os.environ.get("FHG_AUTH_SECRET", cls.auth_secret),
             apple_audiences=_csv("FHG_APPLE_AUDIENCES"),
             google_audiences=_csv("FHG_GOOGLE_AUDIENCES"),
+            public_url=os.environ.get("FHG_PUBLIC_URL") or None,
+            ios_app_ids=_csv("FHG_IOS_APP_IDS"),
+            android_package=os.environ.get("FHG_ANDROID_PACKAGE") or None,
+            android_cert_sha256=_csv("FHG_ANDROID_CERT_SHA256"),
         )
 
 
@@ -234,6 +244,26 @@ def create_app(settings: Optional[Settings] = None,
             raise HTTPException(404)
         content = (PKG_DIR / "sample_data" / files[name]).read_text()
         return JSONResponse(json.loads(content) if name == "fhir" else {"content": content})
+
+    # Universal Links (iOS) and App Links (Android): let invite links open the app.
+    @app.get("/.well-known/apple-app-site-association", include_in_schema=False)
+    def apple_app_site_association():
+        if not settings.ios_app_ids:
+            raise HTTPException(404)
+        return JSONResponse({"applinks": {"details": [{
+            "appIDs": list(settings.ios_app_ids),
+            "components": [{"/": "/invite/*", "comment": "Family invitations open in the app"}],
+        }]}})
+
+    @app.get("/.well-known/assetlinks.json", include_in_schema=False)
+    def android_asset_links():
+        if not (settings.android_package and settings.android_cert_sha256):
+            raise HTTPException(404)
+        return JSONResponse([{
+            "relation": ["delegate_permission/common.handle_all_urls"],
+            "target": {"namespace": "android_app", "package_name": settings.android_package,
+                       "sha256_cert_fingerprints": list(settings.android_cert_sha256)},
+        }])
 
     @app.get("/health")
     def health() -> dict:
@@ -527,7 +557,7 @@ def create_app(settings: Optional[Settings] = None,
         store.audit(user_id, "user", "invitation.created",
                     {"invitation_id": inv["id"], "relationship": relationship.value})
         return {"invitation": public_invitation(inv), "token": token,
-                "invite_url": str(request.base_url).rstrip("/") + f"/invite/{token}",
+                "invite_url": (settings.public_url or str(request.base_url)).rstrip("/") + f"/invite/{token}",
                 "note": "Send this link to your relative. It works once and expires in 14 days."}
 
     @app.get("/v1/invitations")

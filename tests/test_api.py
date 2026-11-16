@@ -145,3 +145,28 @@ def test_cors_is_opt_in(tmp_path):
     opened = TestClient(create_app(Settings(**base, cors_origins=("http://localhost:8081",))))
     r = opened.get("/health", headers={"Origin": "http://localhost:8081"})
     assert r.headers["access-control-allow-origin"] == "http://localhost:8081"
+
+
+def test_universal_and_app_links(tmp_path):
+    base = dict(db_path=str(tmp_path / "l.db"), encryption_key=Fernet.generate_key().decode())
+    off = TestClient(create_app(Settings(**base)))
+    assert off.get("/.well-known/apple-app-site-association").status_code == 404
+    assert off.get("/.well-known/assetlinks.json").status_code == 404
+
+    on = TestClient(create_app(Settings(
+        **base, public_url="https://app.example.org/", ios_app_ids=("ABCDE12345.com.example.familyhealthgraph",),
+        android_package="com.example.familyhealthgraph", android_cert_sha256=("AA:BB:CC",))))
+    aasa = on.get("/.well-known/apple-app-site-association")
+    assert aasa.headers["content-type"] == "application/json"
+    detail = aasa.json()["applinks"]["details"][0]
+    assert detail["appIDs"] == ["ABCDE12345.com.example.familyhealthgraph"]
+    assert detail["components"][0]["/"] == "/invite/*"
+    links = on.get("/.well-known/assetlinks.json").json()
+    assert links[0]["target"] == {"namespace": "android_app", "package_name": "com.example.familyhealthgraph",
+                                  "sha256_cert_fingerprints": ["AA:BB:CC"]}
+
+    # Invite links use the public origin, not whatever host the request came in on.
+    h = {"Authorization": f"Bearer {on.post('/v1/users').json()['token']}"}
+    url = on.post("/v1/invitations", json={"relationship": "mother"}, headers=h).json()["invite_url"]
+    assert url.startswith("https://app.example.org/invite/")
+    assert "familyhealth://invite/" in on.get(url.replace("https://app.example.org", "")).text

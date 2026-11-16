@@ -87,6 +87,7 @@ async function load() {
       <option value="none">Nothing for now</option>
     </select>
     <div class="row"><button class="primary" id="accept">Accept and join</button><button id="decline">No thanks</button></div>
+    <p class="muted">Have the app? <a href="familyhealth://invite/${encodeURIComponent(inviteToken)}" style="color:inherit">Open this invitation in the app</a>.</p>
     <div id="error"></div>
     <p class="muted">${token ? "You'll join with the account already on this device." : "A private account will be created on this device."}
       Expires ${esc(new Date(p.expires_at).toLocaleDateString())}.</p>`;
