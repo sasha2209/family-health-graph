@@ -135,3 +135,13 @@ def test_delete_account(client):
 def test_dashboard_served(client):
     r = client.get("/")
     assert r.status_code == 200 and "Family Health Graph" in r.text
+
+
+def test_cors_is_opt_in(tmp_path):
+    base = dict(db_path=str(tmp_path / "c.db"), encryption_key=Fernet.generate_key().decode())
+    closed = TestClient(create_app(Settings(**base)))
+    r = closed.get("/health", headers={"Origin": "http://localhost:8081"})
+    assert "access-control-allow-origin" not in r.headers
+    opened = TestClient(create_app(Settings(**base, cors_origins=("http://localhost:8081",))))
+    r = opened.get("/health", headers={"Origin": "http://localhost:8081"})
+    assert r.headers["access-control-allow-origin"] == "http://localhost:8081"
