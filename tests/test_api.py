@@ -170,3 +170,28 @@ def test_universal_and_app_links(tmp_path):
     url = on.post("/v1/invitations", json={"relationship": "mother"}, headers=h).json()["invite_url"]
     assert url.startswith("https://app.example.org/invite/")
     assert "familyhealth://invite/" in on.get(url.replace("https://app.example.org", "")).text
+
+
+def test_any_strong_secret_works_as_encryption_key(tmp_path):
+    from fhg.security import load_cipher
+    secret = "Zm9vYmFyYmF6cXV4cXV1eHF1dXhmb29iYXJiYXo+/generated-by-render=="
+    a = load_cipher(secret, tmp_path / "unused.key")
+    b = load_cipher(secret, tmp_path / "unused.key")
+    assert b.decrypt(a.encrypt("same secret, same key")) == "same secret, same key"
+    with pytest.raises(ValueError):
+        load_cipher("too-short", tmp_path / "unused.key")
+
+
+def test_serves_mobile_web_build_with_spa_fallback(tmp_path):
+    web = tmp_path / "web"
+    (web / "_expo").mkdir(parents=True)
+    (web / "index.html").write_text("<html>app shell</html>")
+    (web / "_expo" / "bundle.js").write_text("console.log(1)")
+    (tmp_path / "secret.txt").write_text("outside")
+    c = TestClient(create_app(Settings(db_path=str(tmp_path / "w.db"), encryption_key=Fernet.generate_key().decode(),
+                                       web_app_dir=str(web))))
+    assert c.get("/app").text == "<html>app shell</html>"
+    assert c.get("/app/_expo/bundle.js").text == "console.log(1)"
+    assert c.get("/app/invite/abc123").text == "<html>app shell</html>"      # client-side route
+    assert "outside" not in c.get("/app/../secret.txt").text                  # no path traversal
+    assert "outside" not in c.get("/app/%2e%2e/secret.txt").text

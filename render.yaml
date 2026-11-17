@@ -1,0 +1,33 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# Deploy: https://render.com/deploy?repo=https://github.com/sasha2209/family-health-graph
+services:
+  - type: web
+    name: family-health-graph
+    runtime: docker
+    # A persistent disk (needed for the SQLite database) requires a paid instance.
+    # On the free plan, remove the disk block: everything works, but data resets on each deploy.
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: true
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      # Generated once by Render and kept. Losing FHG_ENCRYPTION_KEY makes the data unreadable:
+      # copy it from the Render dashboard into your password manager after the first deploy.
+      - key: FHG_ENCRYPTION_KEY
+        generateValue: true
+      - key: FHG_AUTH_SECRET
+        generateValue: true
+      - key: FHG_PSEUDONYM_SECRET
+        generateValue: true
+      - key: FHG_ADMIN_KEY
+        generateValue: true
+      # Sign-in codes are printed to the Render logs until you configure email:
+      # set FHG_EMAIL_BACKEND=smtp plus FHG_SMTP_HOST, FHG_SMTP_PORT, FHG_SMTP_USERNAME,
+      # FHG_SMTP_PASSWORD (as a secret) and FHG_EMAIL_FROM.
+      - key: FHG_EMAIL_BACKEND
+        value: console
+      - key: FHG_PUSH_BACKEND
+        value: console

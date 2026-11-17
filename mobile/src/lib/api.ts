@@ -24,6 +24,7 @@ import type {
  * On a physical phone "localhost" is the phone itself, so use your computer's
  * LAN address (and start the server with FHG_HOST=0.0.0.0).
  */
+// An empty value means "same origin", used when the web build is served by the API itself.
 export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 
 export class ApiError extends Error {

@@ -3,6 +3,10 @@
 // Universal Links on iOS and verified App Links on Android. The server must
 // serve the matching /.well-known files (FHG_IOS_APP_IDS, FHG_ANDROID_*).
 module.exports = ({ config }) => {
+  // EXPO_BASE_URL=/app when the web build is served under a sub-path (see ../Dockerfile).
+  if (process.env.EXPO_BASE_URL) {
+    config = { ...config, experiments: { ...config.experiments, baseUrl: process.env.EXPO_BASE_URL } };
+  }
   const domain = process.env.EXPO_PUBLIC_LINK_DOMAIN;
   if (!domain) return config;
   return {

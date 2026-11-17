@@ -1,6 +1,7 @@
 """Encryption at rest, token handling and pseudonymisation."""
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import logging
@@ -31,9 +32,25 @@ class FieldCipher:
         return self._fernet.decrypt(token).decode("utf-8")
 
 
+def fernet_key(secret: str) -> bytes:
+    """Use ``secret`` as a Fernet key if it is one; otherwise derive one from it.
+
+    Hosting platforms generate random secrets in their own formats (e.g.
+    Render's ``generateValue``), so any high-entropy string is accepted. The
+    derivation is deterministic: the same secret always opens the same data.
+    """
+    try:
+        Fernet(secret.encode())
+        return secret.encode()
+    except ValueError:
+        return base64.urlsafe_b64encode(hashlib.sha256(b"fhg-encryption-key:" + secret.encode()).digest())
+
+
 def load_cipher(key: Optional[str], key_file: Path) -> FieldCipher:
     if key:
-        return FieldCipher(key.encode())
+        if len(key) < 32:
+            raise ValueError("FHG_ENCRYPTION_KEY must be at least 32 characters of random data")
+        return FieldCipher(fernet_key(key))
     if key_file.exists():
         return FieldCipher(key_file.read_bytes().strip())
     log.warning(
