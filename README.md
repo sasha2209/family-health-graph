@@ -9,6 +9,8 @@ cardiovascular risk checks.
 > usually incomplete, scattered across relatives' memories, and missing from the EHR. This
 > project turns it into structured data that can drive action.
 
+**Clinic portal (B2B):** open `/portal` for the clinician worklist, impact dashboard and demo patients; see [docs/B2B_AND_FUNDING.md](docs/B2B_AND_FUNDING.md).
+
 For how this grows through partnerships with existing companies, see
 **[docs/PARTNERSHIP_STRATEGY.md](docs/PARTNERSHIP_STRATEGY.md)**. For the path to iOS and
 Android apps, see **[docs/MOBILE_APP.md](docs/MOBILE_APP.md)**; the app itself (Expo / React Native)
@@ -22,7 +24,7 @@ is in **[mobile/](mobile/README.md)**.
 cd family-health-graph
 pip install -r requirements.txt
 python -m fhg            # http://127.0.0.1:8000  (dashboard)  ·  /docs (OpenAPI)
-python -m pytest -q      # 111 tests
+python -m pytest -q      # 122 tests
 ```
 
 CI (`.github/workflows/ci.yml`) runs the backend tests and the mobile app's typecheck, lint and tests on every pull request.
@@ -123,6 +125,10 @@ Design principles:
 | `GET /v1/notifications` · `POST /v1/notifications/read` | Family alerts |
 | `PUT /v1/devices/push` · `GET /v1/devices/push` · `DELETE /v1/devices/push` | Register this device's Expo push token (tied to the session, so signing out stops pushes) |
 | `GET /v1/profile?include_linked=true` | Your record plus what relatives share |
+| `GET /v1/report/clinician` | Print-ready clinician summary with pedigree (`?include_shared=false` to leave out relatives' shared history) |
+| `POST /v1/orgs` · `POST /v1/orgs/join` · `GET /v1/orgs` | Create a clinic, join as staff with the staff code, list your clinics |
+| `GET /v1/orgs/{id}/patients` · `GET /v1/orgs/{id}/patients/{ref}/report` | Clinic worklist with impact metrics; a patient's clinician summary (logged in the patient's audit trail) |
+| `GET /v1/clinics/lookup/{code}` · `POST /v1/clinics` · `GET /v1/clinics` · `DELETE /v1/clinics/{id}` | Patient: find a clinic by code, connect, list, disconnect |
 | `GET /v1/export/fhir` | Data portability (FHIR bundle; your own data only) |
 | `GET /v1/ingests` · `GET /v1/audit` | Provenance and audit trail |
 | `DELETE /v1/me` | Delete all data |
