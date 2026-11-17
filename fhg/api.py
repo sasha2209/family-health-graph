@@ -175,6 +175,12 @@ class ClinicConnectIn(CodeIn):
     display_name: str = Field(..., min_length=2, max_length=120)
 
 
+class ReferralIn(BaseModel):
+    rule_id: str = Field(..., max_length=60)
+    status: str = Field(..., pattern="^(referred|scheduled|completed|declined)$")
+    note: Optional[str] = Field(None, max_length=500)
+
+
 class ShareIn(BaseModel):
     share_level: str = Field(..., pattern="^(" + "|".join(SHARE_LEVELS) + ")$")
 
@@ -538,12 +544,20 @@ def create_app(settings: Optional[Settings] = None,
     def my_orgs(user_id: str = Depends(current_user)) -> list[dict]:
         return [org_public(o, o["role"]) for o in store.orgs_for_staff(user_id)]
 
+    def org_referrals(org_id: str) -> list[dict]:
+        refs = store.referrals_for_org(org_id)
+        for r in refs:  # expose the per-clinic pseudonym, never the internal user id
+            r["user_ref"] = clinic.patient_ref(settings.auth_secret, org_id, r.pop("user_id"))
+        return refs
+
     def org_rows(org_id: str) -> list[tuple[dict, dict, HealthProfile]]:
+        status_by = {(r["user_ref"], r["rule_id"]): r["status"] for r in org_referrals(org_id)}
         out = []
         for p in store.org_patients(org_id):
             profile = effective_profile(store, p["user_id"])
-            row = clinic.patient_row(clinic.patient_ref(settings.auth_secret, org_id, p["user_id"]),
-                                     p["display"], p["connected_at"], profile, generate_insights(profile))
+            ref = clinic.patient_ref(settings.auth_secret, org_id, p["user_id"])
+            row = clinic.patient_row(ref, p["display"], p["connected_at"], profile, generate_insights(profile),
+                                     referrals={rule: st for (pr, rule), st in status_by.items() if pr == ref})
             out.append((row, p, profile))
         return out
 
@@ -555,7 +569,39 @@ def create_app(settings: Optional[Settings] = None,
             store.audit(p["user_id"], f"org:{org_id}", "clinic.viewed_list", {"org": org["name"]})
         worklist = clinic.sort_worklist([r for r, _, _ in rows])
         return {"org": org_public(org, store.staff_role(org_id, user_id)),
-                "impact": clinic.impact(worklist), "patients": worklist}
+                "impact": clinic.impact(worklist, org_referrals(org_id)), "patients": worklist}
+
+    @app.post("/v1/orgs/{org_id}/patients/{patient_ref}/referrals")
+    def update_referral(org_id: str, patient_ref: str, body: ReferralIn,
+                        user_id: str = Depends(current_user)) -> dict:
+        org = staff_org(org_id, user_id)
+        if body.rule_id not in clinic.PROGRAMS:
+            raise HTTPException(422, "Unknown care program")
+        patient = next((p for p in store.org_patients(org_id) if hmac.compare_digest(
+            clinic.patient_ref(settings.auth_secret, org_id, p["user_id"]), patient_ref)), None)
+        if patient is None:
+            raise HTTPException(404, "No such patient")
+        before = next((r["status"] for r in store.referrals_for_patient(patient["user_id"])
+                       if r["org_id"] == org_id and r["rule_id"] == body.rule_id), None)
+        referral = store.set_referral_status(org_id, patient["user_id"], body.rule_id, body.status,
+                                             user_id, body.note)
+        store.audit(patient["user_id"], f"org:{org_id}", "clinic.referral",
+                    {"org": org["name"], "program": clinic.PROGRAMS[body.rule_id], "status": body.status})
+        if body.status in ("referred", "scheduled") and body.status != before:
+            verb = "referred you for" if body.status == "referred" else "scheduled your"
+            notifier.notify(patient["user_id"], "referral",
+                            f"{org['name']} {verb}: {clinic.PROGRAMS[body.rule_id]}. "
+                            "Contact your clinic if you have questions.")
+        referral.pop("user_id", None)
+        for e in referral["history"]:
+            e["by_you"] = e.pop("by_user") == user_id
+        return {"patient_ref": patient_ref, "program": clinic.PROGRAMS[body.rule_id], **referral}
+
+    @app.get("/v1/referrals")
+    def my_referrals(user_id: str = Depends(current_user)) -> list[dict]:
+        """Patient: referrals your clinics have made for you."""
+        return [r | {"program": clinic.PROGRAMS.get(r["rule_id"], r["rule_id"])}
+                for r in store.referrals_for_patient(user_id)]
 
     @app.get("/v1/orgs/{org_id}/patients/{patient_ref}/report", response_class=HTMLResponse)
     def org_patient_report(org_id: str, patient_ref: str, user_id: str = Depends(current_user)) -> HTMLResponse:

@@ -50,6 +50,16 @@
   .badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 99px; white-space: nowrap; text-transform: uppercase; letter-spacing: .03em; }
   .b-high { background: var(--high-bg); color: var(--high); } .b-moderate { background: var(--mod-bg); color: var(--mod); }
   .b-info { background: var(--info-bg); color: var(--info); } .b-none { background: var(--bg); color: var(--muted); }
+  .flag { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+  .flag .chip { margin: 0; }
+  .flag select { padding: 3px 6px; font-size: 12px; border-radius: 6px; }
+  .st-referred { border-color: var(--info) !important; color: var(--info); }
+  .st-scheduled { border-color: var(--mod) !important; color: var(--mod); }
+  .st-completed { border-color: var(--accent) !important; color: var(--accent); background: var(--accent-soft) !important; }
+  .st-declined { color: var(--muted); }
+  .funnel { width: 100%; min-width: 0; border-collapse: collapse; font-size: 13px; }
+  .funnel th, .funnel td { padding: 6px 4px; border-bottom: 1px solid var(--border); text-align: right; }
+  .funnel th:first-child, .funnel td:first-child { text-align: left; }
   .chip { display: inline-block; font-size: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 99px; padding: 1px 8px; margin: 0 4px 4px 0; }
   .meter { width: 80px; height: 6px; background: var(--border); border-radius: 99px; overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 6px; }
   .meter > span { display: block; height: 100%; background: var(--accent); }
@@ -94,7 +104,11 @@
         </table></div>
       </div>
       <div style="display:grid; gap:14px; align-content:start">
-        <div class="card"><h2>Identified by care program</h2><div id="programs"></div></div>
+        <div class="card">
+          <div class="row" style="justify-content:space-between; margin-bottom:8px"><h2 style="margin:0">Referral funnel</h2>
+            <button id="export">Download pilot report</button></div>
+          <div id="funnel"></div>
+        </div>
         <div class="card">
           <h2>Connect patients</h2>
           <p class="muted" style="margin-top:0">Patients enter this code in the Family Health Graph app (Settings → Connect to your clinic). Print it on visit reminders.</p>
@@ -108,6 +122,8 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const STATUS_OPTS = [["identified", "Identified"], ["referred", "Referred"], ["scheduled", "Scheduled"],
+                     ["completed", "Completed"], ["declined", "Declined"]];
 const PRIORITY = { high: "Discuss soon", moderate: "Next visit", info: "Awareness", none: "No action" };
 const KEY = "fhg_portal_token";
 let token = null, orgs = [], orgId = null, data = null;
@@ -150,13 +166,15 @@ async function loadOrg() {
     [im.patients_connected, "Patients connected"],
     [im.patients_with_high_priority, "Worth discussing soon"],
     [im.patients_flagged, "Qualify for a care program"],
+    [im.referrals_made, "Referred"],
+    [im.referrals_completed, "Referrals completed"],
     [im.avg_completeness + "%", "Avg. family history completeness"],
   ].map(([n, l]) => `<div class="tile"><div class="n">${esc(n)}</div><div class="l">${esc(l)}</div></div>`).join("");
-  const max = Math.max(1, ...im.programs.map((p) => p.patients));
-  $("programs").innerHTML = im.programs.length ? im.programs.map((p) => `
-    <div class="bar"><span>${esc(p.program)}</span><b>${p.patients}</b>
-      <div class="track"><div class="fill" style="width:${(p.patients / max) * 100}%"></div></div></div>`).join("")
-    : '<p class="muted">No patients identified yet.</p>';
+  $("funnel").innerHTML = im.funnel.length ? `<table class="funnel">
+    <tr><th>Care program</th><th title="Identified">Ident.</th><th title="Referred">Ref.</th><th title="Scheduled">Sched.</th><th title="Completed">Done</th></tr>
+    ${im.funnel.map((f) => `<tr><td>${esc(f.program)}${f.median_days_to_complete != null ? `<br><span class="muted">median ${f.median_days_to_complete < 1 ? "under a day" : f.median_days_to_complete + " days"} to complete</span>` : ""}</td>
+      <td>${f.identified}</td><td>${f.referred}</td><td>${f.scheduled}</td><td><b>${f.completed}</b> <span class="muted">(${f.completion_rate}%)</span></td></tr>`).join("")}
+    </table>` : '<p class="muted">No patients identified yet.</p>';
   const current = $("filter").value;
   $("filter").innerHTML = '<option value="">All programs</option>' +
     im.programs.map((p) => `<option ${p.program === current ? "selected" : ""}>${esc(p.program)}</option>`).join("");
@@ -171,10 +189,21 @@ function renderRows() {
     <tr>
       <td class="who"><b>${esc(p.display_name)}</b><br><span class="muted">${p.age != null ? esc(p.age) : "Age ?"} · ${esc(p.sex || "sex ?")} · ${p.relatives} relatives</span></td>
       <td><span class="badge b-${esc(p.priority)}">${PRIORITY[p.priority]}</span></td>
-      <td>${p.flags.map((x) => `<span class="chip" title="${esc(x.title)}">${esc(x.program)}</span>`).join("") || '<span class="muted">—</span>'}</td>
+      <td>${p.flags.map((x) => `<div class="flag"><span class="chip" title="${esc(x.title)}">${esc(x.program)}</span>
+        <select class="st-${esc(x.referral)}" data-pref="${esc(p.patient_ref)}" data-rule="${esc(x.rule_id)}" aria-label="Referral status for ${esc(x.program)}">
+          ${STATUS_OPTS.map(([v, l]) => `<option value="${v}" ${v === x.referral ? "selected" : ""} ${v === "identified" ? "disabled" : ""}>${l}</option>`).join("")}
+        </select></div>`).join("") || '<span class="muted">—</span>'}</td>
       <td><span class="meter"><span style="width:${p.completeness}%"></span></span><span class="muted">${p.completeness}%</span></td>
       <td class="act"><button data-ref="${esc(p.patient_ref)}">Summary</button></td>
     </tr>`).join("") : `<tr><td colspan="5" class="muted">${data.patients.length ? "No patients in this program." : "No patients connected yet. Share your patient code, or load demo patients."}</td></tr>`;
+  document.querySelectorAll("select[data-rule]").forEach((sel) => sel.onchange = async () => {
+    sel.disabled = true;
+    try {
+      await api(`/v1/orgs/${orgId}/patients/${sel.dataset.pref}/referrals`, { method: "POST",
+        body: JSON.stringify({ rule_id: sel.dataset.rule, status: sel.value }) });
+      status("Referral updated."); await loadOrg();
+    } catch (e) { status("Error: " + e.message); sel.disabled = false; }
+  });
   document.querySelectorAll("[data-ref]").forEach((b) => b.onclick = async () => {
     const html = await api(`/v1/orgs/${orgId}/patients/${b.dataset.ref}/report`);
     window.open(URL.createObjectURL(new Blob([html], { type: "text/html" })), "_blank", "noopener");
@@ -230,6 +259,22 @@ $("join-org").onclick = async () => {
 };
 $("org-select").onchange = (e) => { orgId = e.target.value; loadOrg(); };
 $("filter").onchange = renderRows;
+// Pilot report: the impact numbers a clinic shares with leadership and funders. No patient names.
+$("export").onclick = () => {
+  const im = data.impact, q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const lines = [
+    ["Pilot report", data.org.name], ["Generated", new Date().toISOString().slice(0, 10)], [],
+    ["Patients connected", im.patients_connected], ["Qualify for a care program", im.patients_flagged],
+    ["Worth discussing soon", im.patients_with_high_priority], ["Referred", im.referrals_made],
+    ["Referrals completed", im.referrals_completed], ["Avg. family history completeness (%)", im.avg_completeness], [],
+    ["Care program", "Identified", "Referred", "Scheduled", "Completed", "Declined", "Completion rate (%)", "Median days to complete"],
+    ...im.funnel.map((f) => [f.program, f.identified, f.referred, f.scheduled, f.completed, f.declined, f.completion_rate, f.median_days_to_complete ?? ""]),
+  ];
+  const csv = lines.map((r) => r.map(q).join(",")).join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  a.download = `pilot-report-${data.org.name.replace(/\W+/g, "-").toLowerCase()}.csv`; a.click();
+};
 $("signout").onclick = async () => { try { await api("/v1/auth/logout", { method: "POST" }); } catch (e) {} setToken(null); render(); };
 render().catch((e) => status("Error: " + e.message));
 </script>
