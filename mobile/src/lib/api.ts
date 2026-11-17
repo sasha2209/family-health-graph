@@ -118,6 +118,8 @@ export function createApi(token: string | null) {
     lookupClinic: (code: string) => authed<{ id: string; name: string }>(`/v1/clinics/lookup/${encodeURIComponent(code.trim())}`),
     connectClinic: (code: string, displayName: string) =>
       authed<{ id: string; name: string }>('/v1/clinics', { method: 'POST', body: { code: code.trim(), display_name: displayName.trim() } }),
+    referrals: () => authed<{ rule_id: string; status: 'referred' | 'scheduled' | 'completed' | 'declined';
+      updated_at: string; org_name: string; org_id: string; program: string }[]>('/v1/referrals'),
     clinics: () => authed<{ id: string; name: string; connected_at: string }[]>('/v1/clinics'),
     disconnectClinic: (orgId: string) => authed<void>(`/v1/clinics/${encodeURIComponent(orgId)}`, { method: 'DELETE' }),
     registerPush: (token: string, platform: 'ios' | 'android') =>

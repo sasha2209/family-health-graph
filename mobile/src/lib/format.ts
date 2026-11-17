@@ -37,3 +37,10 @@ export function sideOf(relationship: string): string {
   }
   return 'Extended';
 }
+
+export const REFERRAL_LABEL: Record<string, string> = {
+  referred: 'Referred',
+  scheduled: 'Appointment scheduled',
+  completed: 'Completed',
+  declined: 'Not pursuing',
+};

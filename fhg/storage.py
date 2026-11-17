@@ -79,6 +79,25 @@ CREATE TABLE IF NOT EXISTS org_patients (
     connected_at TEXT NOT NULL,
     PRIMARY KEY (org_id, user_id)
 );
+-- One referral per (clinic, patient, care program); every status change is an event.
+CREATE TABLE IF NOT EXISTS referrals (
+    id TEXT PRIMARY KEY,
+    org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    rule_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (org_id, user_id, rule_id)
+);
+CREATE TABLE IF NOT EXISTS referral_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    referral_id TEXT NOT NULL REFERENCES referrals(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,
+    note BLOB,                       -- encrypted free text
+    by_user TEXT NOT NULL,
+    at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS login_codes (
     id TEXT PRIMARY KEY,
     email_key TEXT NOT NULL,
@@ -306,9 +325,53 @@ class Store:
                 (org_id, user_id, self._cipher.encrypt(display), _now()))
 
     def disconnect_patient(self, org_id: str, user_id: str) -> bool:
+        """Removes the clinic's access, and its referrals for this patient."""
         with self._lock, self._conn:
+            self._conn.execute("DELETE FROM referrals WHERE org_id = ? AND user_id = ?", (org_id, user_id))
             return self._conn.execute("DELETE FROM org_patients WHERE org_id = ? AND user_id = ?",
                                       (org_id, user_id)).rowcount == 1
+
+    # --- referrals --------------------------------------------------------------------
+    def set_referral_status(self, org_id: str, user_id: str, rule_id: str, status: str,
+                            by_user: str, note: Optional[str]) -> dict:
+        now = _now()
+        with self._lock, self._conn:
+            row = self._conn.execute("SELECT id FROM referrals WHERE org_id = ? AND user_id = ? AND rule_id = ?",
+                                     (org_id, user_id, rule_id)).fetchone()
+            if row:
+                ref_id = row["id"]
+                self._conn.execute("UPDATE referrals SET status = ?, updated_at = ? WHERE id = ?",
+                                   (status, now, ref_id))
+            else:
+                ref_id = uuid.uuid4().hex[:16]
+                self._conn.execute(
+                    "INSERT INTO referrals (id, org_id, user_id, rule_id, status, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)", (ref_id, org_id, user_id, rule_id, status, now, now))
+            self._conn.execute(
+                "INSERT INTO referral_events (referral_id, status, note, by_user, at) VALUES (?, ?, ?, ?, ?)",
+                (ref_id, status, self._cipher.encrypt(note) if note else None, by_user, now))
+        return self.referral(ref_id)
+
+    def referral(self, ref_id: str) -> Optional[dict]:
+        rows = self._query("SELECT * FROM referrals WHERE id = ?", (ref_id,))
+        if not rows:
+            return None
+        out = dict(rows[0])
+        events = self._query("SELECT status, note, by_user, at FROM referral_events WHERE referral_id = ? ORDER BY id",
+                             (ref_id,))
+        out["history"] = [{"status": e["status"], "at": e["at"], "by_user": e["by_user"],
+                           "note": self._cipher.decrypt(e["note"]) if e["note"] else None} for e in events]
+        return out
+
+    def referrals_for_org(self, org_id: str) -> list[dict]:
+        refs = self._query("SELECT id FROM referrals WHERE org_id = ?", (org_id,))
+        return [self.referral(r["id"]) for r in refs]
+
+    def referrals_for_patient(self, user_id: str) -> list[dict]:
+        rows = self._query("SELECT r.rule_id, r.status, r.updated_at, o.name AS org_name, o.id AS org_id "
+                           "FROM referrals r JOIN organizations o ON o.id = r.org_id WHERE r.user_id = ? "
+                           "ORDER BY r.updated_at DESC", (user_id,))
+        return [dict(r) for r in rows]
 
     def org_patients(self, org_id: str) -> list[dict]:
         rows = self._query("SELECT user_id, display, connected_at FROM org_patients WHERE org_id = ? "

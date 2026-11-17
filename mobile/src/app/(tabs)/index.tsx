@@ -5,6 +5,7 @@ import { Text, View } from 'react-native';
 import { Badge, Check, Progress, Row, Section } from '../../components/list';
 import { Banner, Body, Button, Card, ErrorText, H2, Loading, Screen, styles } from '../../components/ui';
 import { shareDoctorSummary } from '../../lib/doctorSummary';
+import { REFERRAL_LABEL } from '../../lib/format';
 import { pushSupport } from '../../lib/push';
 import { useSession } from '../../lib/session';
 import { LEVEL_LABEL, usePalette } from '../../lib/theme';
@@ -27,8 +28,9 @@ export default function HomeScreen() {
   const c = usePalette();
   const { api } = useSession();
   const { data, error, refreshing, reload } = useLoader(async () => {
-    const [report, notes, own, links, me, push] = await Promise.all([
-      api.insights(), api.notifications(), api.profile(false), api.links(), api.me(), api.pushStatus()]);
+    const [report, notes, own, links, me, push, referrals] = await Promise.all([
+      api.insights(), api.notifications(), api.profile(false), api.links(), api.me(), api.pushStatus(),
+      api.referrals()]);
     const rels = new Set(own.family.map((m) => m.relationship));
     const steps: { title: string; detail: string; done: boolean; href: Href }[] = [
       { title: 'Add your family’s health history', detail: 'Start with what you know. A sentence or two is fine.',
@@ -48,7 +50,7 @@ export default function HomeScreen() {
       steps.push({ title: 'Turn on family alerts', detail: 'Hear when a relative shares something that affects you.',
                    done: push.registered, href: '/settings' });
     }
-    return { report, notes: notes.filter((n) => !n.read), steps };
+    return { report, notes: notes.filter((n) => !n.read), steps, referrals };
   });
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryBusy, setSummaryBusy] = useState(false);
@@ -56,7 +58,7 @@ export default function HomeScreen() {
   const [pdfError, setPdfError] = useState<string | null>(null);
 
   if (!data) return <Screen>{error ? <ErrorText>{error}</ErrorText> : <Loading />}</Screen>;
-  const { report, notes, steps } = data;
+  const { report, notes, steps, referrals } = data;
   const done = steps.filter((s) => s.done).length;
   const todo = steps.filter((s) => !s.done);
   const urgent = report.insights.filter((i) => i.level === 'high').length;
@@ -106,7 +108,10 @@ export default function HomeScreen() {
               <Row
                 key={insight.rule_id}
                 title={insight.title}
-                detail={insight.evidence[0] ?? insight.summary}
+                detail={(() => {
+                  const r = referrals.find((x) => x.rule_id === insight.rule_id);
+                  return r ? `${r.org_name}: ${REFERRAL_LABEL[r.status] ?? r.status}` : insight.evidence[0] ?? insight.summary;
+                })()}
                 eyebrow={<Badge label={LEVEL_LABEL[insight.level]} fg={tone.fg} bg={tone.bg} />}
                 onPress={() => router.push({ pathname: '/insight/[id]', params: { id: insight.rule_id } })}
                 last={i === report.insights.length - 1}

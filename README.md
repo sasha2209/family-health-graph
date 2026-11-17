@@ -24,7 +24,7 @@ is in **[mobile/](mobile/README.md)**.
 cd family-health-graph
 pip install -r requirements.txt
 python -m fhg            # http://127.0.0.1:8000  (dashboard)  ·  /docs (OpenAPI)
-python -m pytest -q      # 122 tests
+python -m pytest -q      # 125 tests
 ```
 
 CI (`.github/workflows/ci.yml`) runs the backend tests and the mobile app's typecheck, lint and tests on every pull request.
@@ -128,6 +128,8 @@ Design principles:
 | `GET /v1/report/clinician` | Print-ready clinician summary with pedigree (`?include_shared=false` to leave out relatives' shared history) |
 | `POST /v1/orgs` · `POST /v1/orgs/join` · `GET /v1/orgs` | Create a clinic, join as staff with the staff code, list your clinics |
 | `GET /v1/orgs/{id}/patients` · `GET /v1/orgs/{id}/patients/{ref}/report` | Clinic worklist with impact metrics; a patient's clinician summary (logged in the patient's audit trail) |
+| `POST /v1/orgs/{id}/patients/{ref}/referrals` | Staff: set a care program's referral status (referred / scheduled / completed / declined), with an optional encrypted note; notifies the patient |
+| `GET /v1/referrals` | Patient: referrals your clinics have made for you |
 | `GET /v1/clinics/lookup/{code}` · `POST /v1/clinics` · `GET /v1/clinics` · `DELETE /v1/clinics/{id}` | Patient: find a clinic by code, connect, list, disconnect |
 | `GET /v1/export/fhir` | Data portability (FHIR bundle; your own data only) |
 | `GET /v1/ingests` · `GET /v1/audit` | Provenance and audit trail |

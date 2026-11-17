@@ -32,12 +32,13 @@ A buyer needs three things from us:
 ## Build order (next)
 
 1. ✅ **Clinic portal MVP**: connect code, worklist by care program, clinician summary, impact tiles, demo data.
-2. **Referral tracking**: mark a flagged patient as *referred → scheduled → completed*. This turns
-   "identified" into "outcome", the pilot's headline metric. Small backend and portal change.
+2. ✅ **Referral tracking**: *identified → referred → scheduled → completed* (or declined) per care program,
+   a funnel with completion rate and median days to complete, a downloadable pilot report (CSV), and patients
+   notified and shown the status in the app.
 3. **Pre-visit intake link**: a clinic link or QR code that takes a new patient straight into the app with
    the clinic already connected. This is the distribution engine: every visit reminder recruits users.
 4. **Partner API keys and webhooks**: let a genetic-counseling or testing partner receive consented referrals
    programmatically (FHIR `ServiceRequest`), which is the foundation of per-referral partnerships.
 5. **SMART on FHIR app launch**: open the clinician summary inside Epic or Oracle Health for a patient.
    Big for health-system sales, but it needs a sandbox account.
-6. **Exportable pilot report**: a one-page PDF of the impact numbers for the clinic's leadership and for investors.
+6. **Pilot report as a PDF** (the CSV export exists): a one-page summary of the impact numbers for the clinic's leadership and for investors.
