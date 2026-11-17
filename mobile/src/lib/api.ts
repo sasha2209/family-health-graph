@@ -115,6 +115,11 @@ export function createApi(token: string | null) {
         method: 'POST', body: { id_token: idToken, nonce, device: DEVICE_NAME },
       }),
     me: () => authed<Me>('/v1/auth/me'),
+    lookupClinic: (code: string) => authed<{ id: string; name: string }>(`/v1/clinics/lookup/${encodeURIComponent(code.trim())}`),
+    connectClinic: (code: string, displayName: string) =>
+      authed<{ id: string; name: string }>('/v1/clinics', { method: 'POST', body: { code: code.trim(), display_name: displayName.trim() } }),
+    clinics: () => authed<{ id: string; name: string; connected_at: string }[]>('/v1/clinics'),
+    disconnectClinic: (orgId: string) => authed<void>(`/v1/clinics/${encodeURIComponent(orgId)}`, { method: 'DELETE' }),
     registerPush: (token: string, platform: 'ios' | 'android') =>
       authed<{ registered: boolean }>('/v1/devices/push', { method: 'PUT', body: { token, platform } }),
     pushStatus: () => authed<{ registered: boolean }>('/v1/devices/push'),

@@ -8,6 +8,7 @@ Swap SQLite for Postgres in production; the interface stays the same.
 from __future__ import annotations
 
 import json
+import secrets
 import sqlite3
 import threading
 import uuid
@@ -55,6 +56,29 @@ CREATE TABLE IF NOT EXISTS push_devices (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_push_user ON push_devices(user_id);
+-- Clinics and other care organisations (B2B). Patients connect with a code and
+-- can disconnect at any time; staff see only connected patients.
+CREATE TABLE IF NOT EXISTS organizations (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    patient_code TEXT NOT NULL UNIQUE,
+    staff_code TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS org_staff (
+    org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (org_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS org_patients (
+    org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    display BLOB NOT NULL,          -- encrypted name the patient chose to show the clinic
+    connected_at TEXT NOT NULL,
+    PRIMARY KEY (org_id, user_id)
+);
 CREATE TABLE IF NOT EXISTS login_codes (
     id TEXT PRIMARY KEY,
     email_key TEXT NOT NULL,
@@ -232,6 +256,70 @@ class Store:
         if n:
             self.audit(user_id, "user", "session.revoked", {"session_id": session_id})
         return n == 1
+
+    # --- organisations (clinic portal) --------------------------------------------------
+    @staticmethod
+    def _join_code() -> str:
+        alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I
+        raw = "".join(secrets.choice(alphabet) for _ in range(8))
+        return f"{raw[:4]}-{raw[4:]}"
+
+    def create_org(self, name: str, admin_user_id: str) -> dict:
+        org_id, now = uuid.uuid4().hex[:12], _now()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO organizations (id, name, patient_code, staff_code, created_at) VALUES (?, ?, ?, ?, ?)",
+                (org_id, name, self._join_code(), self._join_code(), now))
+            self._conn.execute("INSERT INTO org_staff (org_id, user_id, role, created_at) VALUES (?, ?, 'admin', ?)",
+                               (org_id, admin_user_id, now))
+        self.audit(admin_user_id, "user", "org.created", {"org_id": org_id})
+        return self.org(org_id)
+
+    def org(self, org_id: str) -> Optional[dict]:
+        rows = self._query("SELECT * FROM organizations WHERE id = ?", (org_id,))
+        return dict(rows[0]) if rows else None
+
+    def org_by_code(self, kind: str, code: str) -> Optional[dict]:
+        column = {"patient": "patient_code", "staff": "staff_code"}[kind]
+        rows = self._query(f"SELECT * FROM organizations WHERE {column} = ?", (code.strip().upper(),))
+        return dict(rows[0]) if rows else None
+
+    def add_staff(self, org_id: str, user_id: str, role: str = "clinician") -> None:
+        with self._lock, self._conn:
+            self._conn.execute("INSERT OR IGNORE INTO org_staff (org_id, user_id, role, created_at) VALUES (?, ?, ?, ?)",
+                               (org_id, user_id, role, _now()))
+
+    def staff_role(self, org_id: str, user_id: str) -> Optional[str]:
+        rows = self._query("SELECT role FROM org_staff WHERE org_id = ? AND user_id = ?", (org_id, user_id))
+        return rows[0]["role"] if rows else None
+
+    def orgs_for_staff(self, user_id: str) -> list[dict]:
+        rows = self._query("SELECT o.*, s.role FROM organizations o JOIN org_staff s ON s.org_id = o.id "
+                           "WHERE s.user_id = ? ORDER BY o.created_at", (user_id,))
+        return [dict(r) for r in rows]
+
+    def connect_patient(self, org_id: str, user_id: str, display: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO org_patients (org_id, user_id, display, connected_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(org_id, user_id) DO UPDATE SET display = excluded.display",
+                (org_id, user_id, self._cipher.encrypt(display), _now()))
+
+    def disconnect_patient(self, org_id: str, user_id: str) -> bool:
+        with self._lock, self._conn:
+            return self._conn.execute("DELETE FROM org_patients WHERE org_id = ? AND user_id = ?",
+                                      (org_id, user_id)).rowcount == 1
+
+    def org_patients(self, org_id: str) -> list[dict]:
+        rows = self._query("SELECT user_id, display, connected_at FROM org_patients WHERE org_id = ? "
+                           "ORDER BY connected_at", (org_id,))
+        return [{"user_id": r["user_id"], "display": self._cipher.decrypt(r["display"]),
+                 "connected_at": r["connected_at"]} for r in rows]
+
+    def orgs_for_patient(self, user_id: str) -> list[dict]:
+        rows = self._query("SELECT o.id, o.name, p.connected_at FROM org_patients p JOIN organizations o "
+                           "ON o.id = p.org_id WHERE p.user_id = ? ORDER BY p.connected_at", (user_id,))
+        return [dict(r) for r in rows]
 
     # --- push devices --------------------------------------------------------------
     def register_push_token(self, token: str, user_id: str, session_id: str, platform: Optional[str]) -> None:

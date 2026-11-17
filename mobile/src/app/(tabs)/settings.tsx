@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Alert, Platform, Share, Switch, View } from 'react-native';
 
 import { AppleSignIn } from '../../components/AppleSignIn';
+import { ClinicsCard } from '../../components/ClinicsCard';
 import { Banner, Body, Button, Card, Chips, ErrorText, Field, H2, Loading, Screen, styles } from '../../components/ui';
 import { API_URL } from '../../lib/api';
 import { useAppLock } from '../../lib/appLock';
@@ -40,16 +41,16 @@ export default function SettingsScreen() {
   const { api, signOut } = useSession();
   const lock = useAppLock();
   const { data, error, reload } = useLoader(async () => {
-    const [profile, consents, me, sessions, pushState] = await Promise.all([
-      api.profile(false), api.consents(), api.me(), api.sessions(), api.pushStatus()]);
-    return { profile, me, sessions, push: pushState.registered,
+    const [profile, consents, me, sessions, pushState, clinics] = await Promise.all([
+      api.profile(false), api.consents(), api.me(), api.sessions(), api.pushStatus(), api.clinics()]);
+    return { profile, me, sessions, clinics, push: pushState.registered,
              ai: consents.consents.some((x) => x.scope === AI_SCOPE && x.active) };
   });
   const [birth, setBirth] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
   if (!data) return <Screen>{error ? <ErrorText>{error}</ErrorText> : <Loading />}</Screen>;
-  const { profile, ai, me, sessions, push } = data;
+  const { profile, ai, me, sessions, push, clinics } = data;
   const support = pushSupport();
   const birthValue = birth ?? profile.birth_date ?? '';
 
@@ -79,6 +80,8 @@ export default function SettingsScreen() {
           )}
         </View>
       </Card>
+
+      <ClinicsCard clinics={clinics} onChange={reload} />
 
       <Card>
         <H2>Signed-in devices</H2>

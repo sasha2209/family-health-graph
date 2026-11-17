@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clinic Portal</title>
+<style>
+  :root {
+    --bg: #f5f5f2; --surface: #fff; --text: #1d1d1b; --muted: #6b6b66; --border: #e3e2dc;
+    --accent: #2f6f62; --accent-ink: #fff; --accent-soft: #e6f0ed;
+    --high: #b4442f; --high-bg: #fbeeea; --mod: #8a5d0d; --mod-bg: #fbf3e2; --info: #3d6191; --info-bg: #ecf1f8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161715; --surface: #1f201e; --text: #ecebe6; --muted: #a09f98; --border: #33342f;
+      --accent: #5fb3a1; --accent-ink: #0d1a17; --accent-soft: #1d2f2b;
+      --high: #f08a74; --high-bg: #3a2420; --mod: #e2b45c; --mod-bg: #362c19; --info: #8fb0e0; --info-bg: #1f2a3a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 16px; display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; } header .sub { color: var(--muted); font-size: 13px; }
+  main { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .card h2 { font-size: 15px; margin: 0 0 10px; }
+  .muted { color: var(--muted); }
+  input, select { font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); max-width: 100%; }
+  button { font: inherit; border-radius: 8px; padding: 8px 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  button:disabled { opacity: .6; cursor: default; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row > * { min-width: 0; max-width: 100%; }
+  #filter { width: 260px; max-width: 100%; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .tile .n { font-size: 28px; font-weight: 700; } .tile .l { color: var(--muted); font-size: 13px; }
+  .split { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 3fr); gap: 14px; }
+  @media (max-width: 860px) { .split { grid-template-columns: minmax(0, 1fr); } }
+  .bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; margin-bottom: 10px; font-size: 13px; }
+  .bar .track { grid-column: 1 / -1; height: 6px; background: var(--border); border-radius: 99px; overflow: hidden; }
+  .bar .fill { height: 100%; background: var(--accent); border-radius: 99px; }
+  .code { font: 600 18px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em; background: var(--accent-soft); color: var(--accent); padding: 8px 12px; border-radius: 8px; display: inline-block; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; min-width: 620px; }
+  td.act { white-space: nowrap; width: 1%; }
+  td.who { min-width: 150px; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 99px; white-space: nowrap; text-transform: uppercase; letter-spacing: .03em; }
+  .b-high { background: var(--high-bg); color: var(--high); } .b-moderate { background: var(--mod-bg); color: var(--mod); }
+  .b-info { background: var(--info-bg); color: var(--info); } .b-none { background: var(--bg); color: var(--muted); }
+  .chip { display: inline-block; font-size: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 99px; padding: 1px 8px; margin: 0 4px 4px 0; }
+  .meter { width: 80px; height: 6px; background: var(--border); border-radius: 99px; overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 6px; }
+  .meter > span { display: block; height: 100%; background: var(--accent); }
+  #status { margin: 0; } #status:empty { display: none; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <div><h1>Clinic portal</h1><div class="sub">Family Health Graph · patients identified for follow-up from their family history</div></div>
+  <div class="row"><select id="org-select" class="hidden" aria-label="Organization"></select><button id="signout" class="hidden">Sign out</button></div>
+</header>
+<main>
+  <p id="status" class="muted"></p>
+
+  <section id="signin" class="card hidden">
+    <h2>Sign in</h2>
+    <p class="muted">We'll email you a 6-digit code.</p>
+    <div class="row" id="email-step"><input id="email" type="email" placeholder="you@clinic.org" autocomplete="email" size="28"><button class="primary" id="send-code">Send code</button></div>
+    <div class="row hidden" id="code-step"><input id="code" inputmode="numeric" maxlength="6" placeholder="123456" size="10"><button class="primary" id="verify">Sign in</button></div>
+    <p class="muted" style="margin-top:14px">Exploring? <button id="demo-account">Use a demo account</button></p>
+  </section>
+
+  <section id="setup" class="card hidden">
+    <h2>Set up your organization</h2>
+    <div class="row"><input id="org-name" placeholder="e.g. Riverside Family Practice" size="34"><button class="primary" id="create-org">Create organization</button></div>
+    <p class="muted" style="margin-top:14px">Joining a colleague? <input id="staff-code" placeholder="Staff code" size="12"> <button id="join-org">Join</button></p>
+  </section>
+
+  <section id="dash" class="hidden" style="display:grid; gap:14px">
+    <div class="tiles" id="tiles"></div>
+    <div class="split">
+      <div class="card">
+        <div class="row" style="justify-content:space-between; margin-bottom:8px">
+          <h2 style="margin:0">Patient worklist</h2>
+          <div class="row"><select id="filter" aria-label="Filter by program"><option value="">All programs</option></select>
+            <button id="demo-patients">Load demo patients</button></div>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Patient</th><th>Priority</th><th>May qualify for</th><th>Record</th><th></th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table></div>
+      </div>
+      <div style="display:grid; gap:14px; align-content:start">
+        <div class="card"><h2>Identified by care program</h2><div id="programs"></div></div>
+        <div class="card">
+          <h2>Connect patients</h2>
+          <p class="muted" style="margin-top:0">Patients enter this code in the Family Health Graph app (Settings → Connect to your clinic). Print it on visit reminders.</p>
+          <span class="code" id="patient-code"></span>
+          <div id="staff-box" class="hidden" style="margin-top:14px"><p class="muted" style="margin:0 0 6px">Staff code (share only with colleagues)</p><span class="code" id="staff-code-out"></span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const PRIORITY = { high: "Discuss soon", moderate: "Next visit", info: "Awareness", none: "No action" };
+const KEY = "fhg_portal_token";
+let token = null, orgs = [], orgId = null, data = null;
+try { token = localStorage.getItem(KEY); } catch (e) {}
+const status = (m) => { $("status").textContent = m || ""; };
+const show = (id, on) => $(id).classList.toggle("hidden", !on);
+
+async function api(path, opts = {}, tok = token) {
+  const res = await fetch(path, { ...opts, headers: { "Content-Type": "application/json",
+    ...(tok ? { Authorization: "Bearer " + tok } : {}) } });
+  if (res.status === 401 && tok === token) { setToken(null); render(); throw new Error("Please sign in again."); }
+  if (res.status === 204) return null;
+  const isJson = (res.headers.get("content-type") || "").includes("json");
+  const body = isJson ? await res.json() : await res.text();
+  if (!res.ok) throw new Error((isJson && body.detail) || res.statusText);
+  return body;
+}
+function setToken(t) { token = t; try { t ? localStorage.setItem(KEY, t) : localStorage.removeItem(KEY); } catch (e) {} }
+
+async function render() {
+  status("");
+  for (const id of ["signin", "setup", "dash"]) show(id, false);
+  show("signout", !!token); show("org-select", false);
+  if (!token) { show("signin", true); return; }
+  orgs = await api("/v1/orgs");
+  if (!orgs.length) { show("setup", true); return; }
+  if (!orgs.some((o) => o.id === orgId)) orgId = orgs[0].id;
+  $("org-select").innerHTML = orgs.map((o) => `<option value="${esc(o.id)}" ${o.id === orgId ? "selected" : ""}>${esc(o.name)}</option>`).join("");
+  show("org-select", orgs.length > 1);
+  await loadOrg();
+}
+
+async function loadOrg() {
+  data = await api(`/v1/orgs/${orgId}/patients`);
+  const org = data.org, im = data.impact;
+  document.title = `${org.name} · Clinic Portal`;
+  $("patient-code").textContent = org.patient_code;
+  show("staff-box", !!org.staff_code); $("staff-code-out").textContent = org.staff_code || "";
+  $("tiles").innerHTML = [
+    [im.patients_connected, "Patients connected"],
+    [im.patients_with_high_priority, "Worth discussing soon"],
+    [im.patients_flagged, "Qualify for a care program"],
+    [im.avg_completeness + "%", "Avg. family history completeness"],
+  ].map(([n, l]) => `<div class="tile"><div class="n">${esc(n)}</div><div class="l">${esc(l)}</div></div>`).join("");
+  const max = Math.max(1, ...im.programs.map((p) => p.patients));
+  $("programs").innerHTML = im.programs.length ? im.programs.map((p) => `
+    <div class="bar"><span>${esc(p.program)}</span><b>${p.patients}</b>
+      <div class="track"><div class="fill" style="width:${(p.patients / max) * 100}%"></div></div></div>`).join("")
+    : '<p class="muted">No patients identified yet.</p>';
+  const current = $("filter").value;
+  $("filter").innerHTML = '<option value="">All programs</option>' +
+    im.programs.map((p) => `<option ${p.program === current ? "selected" : ""}>${esc(p.program)}</option>`).join("");
+  show("dash", true);
+  renderRows();
+}
+
+function renderRows() {
+  const f = $("filter").value;
+  const rows = data.patients.filter((p) => !f || p.flags.some((x) => x.program === f));
+  $("rows").innerHTML = rows.length ? rows.map((p) => `
+    <tr>
+      <td class="who"><b>${esc(p.display_name)}</b><br><span class="muted">${p.age != null ? esc(p.age) : "Age ?"} · ${esc(p.sex || "sex ?")} · ${p.relatives} relatives</span></td>
+      <td><span class="badge b-${esc(p.priority)}">${PRIORITY[p.priority]}</span></td>
+      <td>${p.flags.map((x) => `<span class="chip" title="${esc(x.title)}">${esc(x.program)}</span>`).join("") || '<span class="muted">—</span>'}</td>
+      <td><span class="meter"><span style="width:${p.completeness}%"></span></span><span class="muted">${p.completeness}%</span></td>
+      <td class="act"><button data-ref="${esc(p.patient_ref)}">Summary</button></td>
+    </tr>`).join("") : `<tr><td colspan="5" class="muted">${data.patients.length ? "No patients in this program." : "No patients connected yet. Share your patient code, or load demo patients."}</td></tr>`;
+  document.querySelectorAll("[data-ref]").forEach((b) => b.onclick = async () => {
+    const html = await api(`/v1/orgs/${orgId}/patients/${b.dataset.ref}/report`);
+    window.open(URL.createObjectURL(new Blob([html], { type: "text/html" })), "_blank", "noopener");
+  });
+}
+
+// Demo patients: real accounts created through the public API, connected with the patient code.
+const DEMO = [
+  { name: "Priya Shah", fhir: true },
+  { name: "Sam Ortiz", sex: "male", dob: "1987-09-14", text: "My father had colon cancer at 44. My grandfather on my father's side had stomach cancer at 70. My mother is healthy." },
+  { name: "Dana Kim", sex: "female", dob: "1979-02-03", text: "My sister has familial hypercholesterolemia. My father had a heart attack at 48. My mother has high blood pressure." },
+  { name: "Alex Rivera", sex: "male", dob: "1970-06-21", text: "My father had prostate cancer at 62. My brother had prostate cancer at 58. My mother had breast cancer at 71." },
+  { name: "Maria Lopez", sex: "female", dob: "1992-11-30", text: "My cousin had a bad reaction to anesthesia during surgery. My mother has type 2 diabetes." },
+  { name: "Lee Brown", sex: "male", dob: "1995-04-08", text: "My dad has high blood pressure. My mom is healthy." },
+];
+$("demo-patients").onclick = async () => {
+  $("demo-patients").disabled = true; status("Creating demo patients…");
+  try {
+    for (const d of DEMO) {
+      const t = (await api("/v1/users", { method: "POST", body: "{}" }, null)).token;
+      if (d.fhir) await api("/v1/ingest/fhir", { method: "POST", body: JSON.stringify(await (await fetch("/sample/fhir")).json()) }, t);
+      else {
+        await api("/v1/profile/demographics", { method: "PUT", body: JSON.stringify({ sex: d.sex, birth_date: d.dob }) }, t);
+        await api("/v1/ingest/text", { method: "POST", body: JSON.stringify({ text: d.text }) }, t);
+      }
+      await api("/v1/clinics", { method: "POST", body: JSON.stringify({ code: data.org.patient_code, display_name: d.name + " (demo)" }) }, t);
+    }
+    status("Added 6 demo patients."); await loadOrg();
+  } catch (e) { status("Error: " + e.message); } finally { $("demo-patients").disabled = false; }
+};
+
+$("send-code").onclick = async () => {
+  try { await api("/v1/auth/email/start", { method: "POST", body: JSON.stringify({ email: $("email").value }) }, null);
+        show("email-step", false); show("code-step", true); status("Check your email for the code."); }
+  catch (e) { status("Error: " + e.message); }
+};
+$("verify").onclick = async () => {
+  try { const r = await api("/v1/auth/email/verify", { method: "POST", body: JSON.stringify({ email: $("email").value, code: $("code").value, device: "Clinic portal" }) }, null);
+        setToken(r.token); await render(); }
+  catch (e) { status("Error: " + e.message); }
+};
+$("demo-account").onclick = async () => {
+  setToken((await api("/v1/users", { method: "POST", body: JSON.stringify({ device: "Clinic portal (demo)" }) }, null)).token);
+  await render();
+};
+$("create-org").onclick = async () => {
+  try { const o = await api("/v1/orgs", { method: "POST", body: JSON.stringify({ name: $("org-name").value }) }); orgId = o.id; await render(); }
+  catch (e) { status("Error: " + e.message); }
+};
+$("join-org").onclick = async () => {
+  try { const o = await api("/v1/orgs/join", { method: "POST", body: JSON.stringify({ code: $("staff-code").value }) }); orgId = o.id; await render(); }
+  catch (e) { status("Error: " + e.message); }
+};
+$("org-select").onchange = (e) => { orgId = e.target.value; loadOrg(); };
+$("filter").onchange = renderRows;
+$("signout").onclick = async () => { try { await api("/v1/auth/logout", { method: "POST" }); } catch (e) {} setToken(null); render(); };
+render().catch((e) => status("Error: " + e.message));
+</script>
+</body>
+</html>

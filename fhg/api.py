@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from . import auth, push
+from . import auth, clinic, push
 from .clinician_report import render_html as clinician_report_html
 from .family_links import (
     SHARE_LEVELS,
@@ -160,6 +160,19 @@ class OidcIn(DeviceIn):
 class PushTokenIn(BaseModel):
     token: str = Field(..., max_length=200)
     platform: Optional[str] = Field(None, pattern="^(ios|android|web)$")
+
+
+class OrgIn(BaseModel):
+    name: str = Field(..., min_length=2, max_length=120)
+
+
+class CodeIn(BaseModel):
+    code: str = Field(..., min_length=4, max_length=20)
+
+
+class ClinicConnectIn(CodeIn):
+    # How the patient wants to appear to the clinic, e.g. "Priya Shah, DOB 2 May 1984".
+    display_name: str = Field(..., min_length=2, max_length=120)
 
 
 class ShareIn(BaseModel):
@@ -492,6 +505,98 @@ def create_app(settings: Optional[Settings] = None,
         html = clinician_report_html(profile, generate_insights(profile), shared_included=include_shared)
         store.audit(user_id, "user", "report.clinician", {"include_shared": include_shared})
         return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
+    # --- clinic portal (B2B) -------------------------------------------------------------
+    def staff_org(org_id: str, user_id: str) -> dict:
+        org = store.org(org_id)
+        if org is None or store.staff_role(org_id, user_id) is None:
+            raise HTTPException(404, "No such organization")  # don't reveal orgs you aren't in
+        return org
+
+    def org_public(org: dict, role: Optional[str] = None) -> dict:
+        out = {"id": org["id"], "name": org["name"]}
+        if role:
+            out |= {"role": role, "patient_code": org["patient_code"]}
+        if role == "admin":
+            out["staff_code"] = org["staff_code"]
+        return out
+
+    @app.post("/v1/orgs", status_code=201)
+    def create_org(body: OrgIn, user_id: str = Depends(current_user)) -> dict:
+        return org_public(store.create_org(body.name.strip(), user_id), "admin")
+
+    @app.post("/v1/orgs/join")
+    def join_org_as_staff(body: CodeIn, user_id: str = Depends(current_user)) -> dict:
+        org = store.org_by_code("staff", body.code)
+        if org is None:
+            raise HTTPException(404, "No organization has that staff code")
+        store.add_staff(org["id"], user_id)
+        store.audit(user_id, "user", "org.staff_joined", {"org_id": org["id"]})
+        return org_public(org, store.staff_role(org["id"], user_id))
+
+    @app.get("/v1/orgs")
+    def my_orgs(user_id: str = Depends(current_user)) -> list[dict]:
+        return [org_public(o, o["role"]) for o in store.orgs_for_staff(user_id)]
+
+    def org_rows(org_id: str) -> list[tuple[dict, dict, HealthProfile]]:
+        out = []
+        for p in store.org_patients(org_id):
+            profile = effective_profile(store, p["user_id"])
+            row = clinic.patient_row(clinic.patient_ref(settings.auth_secret, org_id, p["user_id"]),
+                                     p["display"], p["connected_at"], profile, generate_insights(profile))
+            out.append((row, p, profile))
+        return out
+
+    @app.get("/v1/orgs/{org_id}/patients")
+    def org_worklist(org_id: str, user_id: str = Depends(current_user)) -> dict:
+        org = staff_org(org_id, user_id)
+        rows = org_rows(org_id)
+        for _, p, _ in rows:
+            store.audit(p["user_id"], f"org:{org_id}", "clinic.viewed_list", {"org": org["name"]})
+        worklist = clinic.sort_worklist([r for r, _, _ in rows])
+        return {"org": org_public(org, store.staff_role(org_id, user_id)),
+                "impact": clinic.impact(worklist), "patients": worklist}
+
+    @app.get("/v1/orgs/{org_id}/patients/{patient_ref}/report", response_class=HTMLResponse)
+    def org_patient_report(org_id: str, patient_ref: str, user_id: str = Depends(current_user)) -> HTMLResponse:
+        org = staff_org(org_id, user_id)
+        for row, p, profile in org_rows(org_id):
+            if hmac.compare_digest(row["patient_ref"], patient_ref):
+                store.audit(p["user_id"], f"org:{org_id}", "clinic.viewed_report", {"org": org["name"]})
+                html = clinician_report_html(profile, generate_insights(profile))
+                return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+        raise HTTPException(404, "No such patient")
+
+    # Patient side: connect to / disconnect from a clinic.
+    @app.get("/v1/clinics/lookup/{code}")
+    def lookup_clinic(code: str, user_id: str = Depends(current_user)) -> dict:
+        org = store.org_by_code("patient", code)
+        if org is None:
+            raise HTTPException(404, "No clinic has that code")
+        return org_public(org)
+
+    @app.post("/v1/clinics", status_code=201)
+    def connect_clinic(body: ClinicConnectIn, user_id: str = Depends(current_user)) -> dict:
+        org = store.org_by_code("patient", body.code)
+        if org is None:
+            raise HTTPException(404, "No clinic has that code")
+        store.connect_patient(org["id"], user_id, body.display_name.strip())
+        store.audit(user_id, "user", "clinic.connected", {"org_id": org["id"], "org": org["name"]})
+        return org_public(org)
+
+    @app.get("/v1/clinics")
+    def my_clinics(user_id: str = Depends(current_user)) -> list[dict]:
+        return store.orgs_for_patient(user_id)
+
+    @app.delete("/v1/clinics/{org_id}", status_code=204)
+    def disconnect_clinic(org_id: str, user_id: str = Depends(current_user)) -> None:
+        if not store.disconnect_patient(org_id, user_id):
+            raise HTTPException(404, "Not connected to that clinic")
+        store.audit(user_id, "user", "clinic.disconnected", {"org_id": org_id})
+
+    @app.get("/portal", response_class=HTMLResponse, include_in_schema=False)
+    def portal_page() -> str:
+        return (PKG_DIR / "static" / "portal.html").read_text()
 
     # --- consent, sharing, portability ---------------------------------------------
     @app.get("/v1/consents")
