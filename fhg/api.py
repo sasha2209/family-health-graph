@@ -12,7 +12,7 @@ from typing import Any, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from . import auth, clinic, push
@@ -173,6 +173,7 @@ class CodeIn(BaseModel):
 class ClinicConnectIn(CodeIn):
     # How the patient wants to appear to the clinic, e.g. "Priya Shah, DOB 2 May 1984".
     display_name: str = Field(..., min_length=2, max_length=120)
+    source: str = Field("code", pattern="^(code|link)$")  # 'link' when joining from a clinic's intake link
 
 
 class ReferralIn(BaseModel):
@@ -272,7 +273,8 @@ def create_app(settings: Optional[Settings] = None,
             raise HTTPException(404)
         return JSONResponse({"applinks": {"details": [{
             "appIDs": list(settings.ios_app_ids),
-            "components": [{"/": "/invite/*", "comment": "Family invitations open in the app"}],
+            "components": [{"/": "/invite/*", "comment": "Family invitations open in the app"},
+                           {"/": "/c/*", "comment": "Clinic intake links open in the app"}],
         }]}})
 
     @app.get("/.well-known/assetlinks.json", include_in_schema=False)
@@ -519,10 +521,16 @@ def create_app(settings: Optional[Settings] = None,
             raise HTTPException(404, "No such organization")  # don't reveal orgs you aren't in
         return org
 
-    def org_public(org: dict, role: Optional[str] = None) -> dict:
+    def public_base(request: Optional[Request] = None) -> str:
+        return (settings.public_url or (str(request.base_url) if request else "")).rstrip("/")
+
+    def intake_url(org: dict, request: Optional[Request] = None) -> str:
+        return f"{public_base(request)}/c/{org['patient_code']}"
+
+    def org_public(org: dict, role: Optional[str] = None, request: Optional[Request] = None) -> dict:
         out = {"id": org["id"], "name": org["name"]}
         if role:
-            out |= {"role": role, "patient_code": org["patient_code"]}
+            out |= {"role": role, "patient_code": org["patient_code"], "intake_url": intake_url(org, request)}
         if role == "admin":
             out["staff_code"] = org["staff_code"]
         return out
@@ -557,18 +565,19 @@ def create_app(settings: Optional[Settings] = None,
             profile = effective_profile(store, p["user_id"])
             ref = clinic.patient_ref(settings.auth_secret, org_id, p["user_id"])
             row = clinic.patient_row(ref, p["display"], p["connected_at"], profile, generate_insights(profile),
-                                     referrals={rule: st for (pr, rule), st in status_by.items() if pr == ref})
+                                     referrals={rule: st for (pr, rule), st in status_by.items() if pr == ref},
+                                     source=p["source"])
             out.append((row, p, profile))
         return out
 
     @app.get("/v1/orgs/{org_id}/patients")
-    def org_worklist(org_id: str, user_id: str = Depends(current_user)) -> dict:
+    def org_worklist(org_id: str, request: Request, user_id: str = Depends(current_user)) -> dict:
         org = staff_org(org_id, user_id)
         rows = org_rows(org_id)
         for _, p, _ in rows:
             store.audit(p["user_id"], f"org:{org_id}", "clinic.viewed_list", {"org": org["name"]})
         worklist = clinic.sort_worklist([r for r, _, _ in rows])
-        return {"org": org_public(org, store.staff_role(org_id, user_id)),
+        return {"org": org_public(org, store.staff_role(org_id, user_id), request),
                 "impact": clinic.impact(worklist, org_referrals(org_id)), "patients": worklist}
 
     @app.post("/v1/orgs/{org_id}/patients/{patient_ref}/referrals")
@@ -626,8 +635,9 @@ def create_app(settings: Optional[Settings] = None,
         org = store.org_by_code("patient", body.code)
         if org is None:
             raise HTTPException(404, "No clinic has that code")
-        store.connect_patient(org["id"], user_id, body.display_name.strip())
-        store.audit(user_id, "user", "clinic.connected", {"org_id": org["id"], "org": org["name"]})
+        store.connect_patient(org["id"], user_id, body.display_name.strip(), body.source)
+        store.audit(user_id, "user", "clinic.connected",
+                    {"org_id": org["id"], "org": org["name"], "via": body.source})
         return org_public(org)
 
     @app.get("/v1/clinics")
@@ -639,6 +649,47 @@ def create_app(settings: Optional[Settings] = None,
         if not store.disconnect_patient(org_id, user_id):
             raise HTTPException(404, "Not connected to that clinic")
         store.audit(user_id, "user", "clinic.disconnected", {"org_id": org_id})
+
+    # --- pre-visit intake link (public: the clinic code is meant to be printed) ---------------
+    def clinic_by_code_or_404(code: str) -> dict:
+        org = store.org_by_code("patient", code)
+        if org is None:
+            raise HTTPException(404, "No clinic has that code")
+        return org
+
+    @app.get("/v1/public/clinics/{code}")
+    def public_clinic(code: str) -> dict:
+        """Just the clinic's name, so the intake page can say who you're sharing with."""
+        org = clinic_by_code_or_404(code)
+        return {"name": org["name"], "code": org["patient_code"]}
+
+    @app.get("/c/{code}", response_class=HTMLResponse, include_in_schema=False)
+    def intake_page(code: str) -> str:
+        clinic_by_code_or_404(code)
+        return (PKG_DIR / "static" / "intake.html").read_text()
+
+    @app.get("/c/{code}/qr.svg", include_in_schema=False)
+    def intake_qr(code: str, request: Request):
+        import io
+
+        import segno
+
+        org = clinic_by_code_or_404(code)
+        buf = io.BytesIO()
+        segno.make(intake_url(org, request), error="m").save(buf, kind="svg", scale=6, border=2,
+                                                             dark="#1d1d1b", xmldecl=False)
+        return Response(buf.getvalue(), media_type="image/svg+xml",
+                        headers={"Cache-Control": "public, max-age=3600"})
+
+    @app.get("/c/{code}/poster", response_class=HTMLResponse, include_in_schema=False)
+    def intake_poster(code: str, request: Request) -> str:
+        from html import escape as esc
+
+        org = clinic_by_code_or_404(code)
+        url = intake_url(org, request)
+        return (PKG_DIR / "static" / "poster.html").read_text().replace(
+            "{{CLINIC}}", esc(org["name"])).replace("{{URL}}", esc(url)).replace(
+            "{{CODE}}", esc(org["patient_code"]))
 
     @app.get("/portal", response_class=HTMLResponse, include_in_schema=False)
     def portal_page() -> str:

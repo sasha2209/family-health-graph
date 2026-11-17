@@ -67,7 +67,7 @@ def completeness(profile: HealthProfile) -> int:
 
 def patient_row(ref: str, display: str, connected_at: str, profile: HealthProfile,
                 report: InsightReport, today: Optional[date] = None,
-                referrals: Optional[dict[str, str]] = None) -> dict:
+                referrals: Optional[dict[str, str]] = None, source: str = "code") -> dict:
     referrals = referrals or {}
     flags = [i for i in report.insights if i.rule_id in PROGRAMS]
     top = min((LEVEL_ORDER[i.level] for i in flags), default=3)
@@ -77,6 +77,7 @@ def patient_row(ref: str, display: str, connected_at: str, profile: HealthProfil
         "age": profile.age(today),
         "sex": profile.sex.value if profile.sex else None,
         "connected_at": connected_at,
+        "joined_via": source,
         "priority": ["high", "moderate", "info", "none"][top],
         "flags": [{"rule_id": i.rule_id, "level": i.level.value, "title": i.title,
                    "program": PROGRAMS[i.rule_id], "referral": referrals.get(i.rule_id, "identified")}
@@ -142,6 +143,7 @@ def impact(rows: list[dict], referrals: Optional[list[dict]] = None) -> dict:
         "programs": [{"program": p, "patients": c} for p, c in programs.most_common()],
         "avg_completeness": round(sum(r["completeness"] for r in rows) / n) if n else 0,
         "avg_relatives_recorded": round(sum(r["relatives"] for r in rows) / n, 1) if n else 0,
+        "joined_via_link": sum(1 for r in rows if r.get("joined_via") == "link"),
         "referrals_made": sum(1 for r in referrals if r["status"] in REACHED["referred"]),
         "referrals_completed": sum(1 for r in referrals if r["status"] == "completed"),
         "funnel": funnel(rows, referrals),

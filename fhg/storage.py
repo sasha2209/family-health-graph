@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS org_patients (
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     display BLOB NOT NULL,          -- encrypted name the patient chose to show the clinic
     connected_at TEXT NOT NULL,
+    source TEXT,                    -- how they joined: 'code' (typed in the app) or 'link' (intake link/QR)
     PRIMARY KEY (org_id, user_id)
 );
 -- One referral per (clinic, patient, care program); every status change is an event.
@@ -192,6 +193,13 @@ class Store:
         self._cipher = cipher
         self._lock = threading.RLock()
         self._migrate_legacy_tokens()
+        self._add_column_if_missing("org_patients", "source", "TEXT")
+
+    def _add_column_if_missing(self, table: str, column: str, decl: str) -> None:
+        cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+        if column not in cols:
+            with self._conn:
+                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
     def _migrate_legacy_tokens(self) -> None:
         """Databases from before sessions existed kept one token per user on the
@@ -317,12 +325,12 @@ class Store:
                            "WHERE s.user_id = ? ORDER BY o.created_at", (user_id,))
         return [dict(r) for r in rows]
 
-    def connect_patient(self, org_id: str, user_id: str, display: str) -> None:
+    def connect_patient(self, org_id: str, user_id: str, display: str, source: str = "code") -> None:
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT INTO org_patients (org_id, user_id, display, connected_at) VALUES (?, ?, ?, ?) "
+                "INSERT INTO org_patients (org_id, user_id, display, connected_at, source) VALUES (?, ?, ?, ?, ?) "
                 "ON CONFLICT(org_id, user_id) DO UPDATE SET display = excluded.display",
-                (org_id, user_id, self._cipher.encrypt(display), _now()))
+                (org_id, user_id, self._cipher.encrypt(display), _now(), source))
 
     def disconnect_patient(self, org_id: str, user_id: str) -> bool:
         """Removes the clinic's access, and its referrals for this patient."""
@@ -374,10 +382,10 @@ class Store:
         return [dict(r) for r in rows]
 
     def org_patients(self, org_id: str) -> list[dict]:
-        rows = self._query("SELECT user_id, display, connected_at FROM org_patients WHERE org_id = ? "
+        rows = self._query("SELECT user_id, display, connected_at, source FROM org_patients WHERE org_id = ? "
                            "ORDER BY connected_at", (org_id,))
         return [{"user_id": r["user_id"], "display": self._cipher.decrypt(r["display"]),
-                 "connected_at": r["connected_at"]} for r in rows]
+                 "connected_at": r["connected_at"], "source": r["source"] or "code"} for r in rows]
 
     def orgs_for_patient(self, user_id: str) -> list[dict]:
         rows = self._query("SELECT o.id, o.name, p.connected_at FROM org_patients p JOIN organizations o "

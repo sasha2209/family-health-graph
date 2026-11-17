@@ -40,6 +40,7 @@
   .bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; margin-bottom: 10px; font-size: 13px; }
   .bar .track { grid-column: 1 / -1; height: 6px; background: var(--border); border-radius: 99px; overflow: hidden; }
   .bar .fill { height: 100%; background: var(--accent); border-radius: 99px; }
+  .intake-url { font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
   .code { font: 600 18px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em; background: var(--accent-soft); color: var(--accent); padding: 8px 12px; border-radius: 8px; display: inline-block; }
   .table-wrap { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; min-width: 620px; }
@@ -110,8 +111,12 @@
           <div id="funnel"></div>
         </div>
         <div class="card">
-          <h2>Connect patients</h2>
-          <p class="muted" style="margin-top:0">Patients enter this code in the Family Health Graph app (Settings → Connect to your clinic). Print it on visit reminders.</p>
+          <h2>Pre-visit intake link</h2>
+          <p class="muted" style="margin-top:0">Add this link to appointment reminders (text or email), or print the poster for your waiting room. Patients share their family history in about two minutes, with no app needed.</p>
+          <div class="intake-url" id="intake-url"></div>
+          <div class="row" style="margin-top:8px"><button id="copy-link">Copy link</button><a id="poster" target="_blank" rel="noopener"><button tabindex="-1">Print poster</button></a></div>
+          <img id="intake-qr" alt="QR code for the intake link" width="150" height="150" style="margin-top:12px; background:#fff; border-radius:8px; padding:6px">
+          <p class="muted" style="margin:12px 0 6px">Patients who already have the app can enter the clinic code instead:</p>
           <span class="code" id="patient-code"></span>
           <div id="staff-box" class="hidden" style="margin-top:14px"><p class="muted" style="margin:0 0 6px">Staff code (share only with colleagues)</p><span class="code" id="staff-code-out"></span></div>
         </div>
@@ -161,10 +166,14 @@ async function loadOrg() {
   const org = data.org, im = data.impact;
   document.title = `${org.name} · Clinic Portal`;
   $("patient-code").textContent = org.patient_code;
+  $("intake-url").textContent = org.intake_url;
+  $("intake-qr").src = `/c/${encodeURIComponent(org.patient_code)}/qr.svg`;
+  $("poster").href = `/c/${encodeURIComponent(org.patient_code)}/poster`;
   show("staff-box", !!org.staff_code); $("staff-code-out").textContent = org.staff_code || "";
   $("tiles").innerHTML = [
     [im.patients_connected, "Patients connected"],
     [im.patients_with_high_priority, "Worth discussing soon"],
+    [im.joined_via_link, "Joined via intake link"],
     [im.patients_flagged, "Qualify for a care program"],
     [im.referrals_made, "Referred"],
     [im.referrals_completed, "Referrals completed"],
@@ -259,6 +268,10 @@ $("join-org").onclick = async () => {
 };
 $("org-select").onchange = (e) => { orgId = e.target.value; loadOrg(); };
 $("filter").onchange = renderRows;
+$("copy-link").onclick = async () => {
+  try { await navigator.clipboard.writeText(data.org.intake_url); status("Intake link copied."); }
+  catch (e) { status("Copy failed. Select the link and copy it manually."); }
+};
 // Pilot report: the impact numbers a clinic shares with leadership and funders. No patient names.
 $("export").onclick = () => {
   const im = data.impact, q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;

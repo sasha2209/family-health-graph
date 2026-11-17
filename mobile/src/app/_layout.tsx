@@ -33,6 +33,7 @@ function RootStack() {
       {/* Reachable signed in or out: invite links open here, and sign-in also links an email. */}
       <Stack.Screen name="invite/[token]" options={{ title: 'Family invitation' }} />
       <Stack.Screen name="sign-in" options={{ title: 'Sign in' }} />
+      <Stack.Screen name="clinic/[code]" options={{ title: 'Share with your clinic' }} />
     </Stack>
     </AppLockProvider>
   );
