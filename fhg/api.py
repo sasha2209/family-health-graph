@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from . import auth, push
+from .clinician_report import render_html as clinician_report_html
 from .family_links import (
     SHARE_LEVELS,
     cascade_categories,
@@ -481,6 +482,16 @@ def create_app(settings: Optional[Settings] = None,
         result = summarize(report, allow_llm=allow)
         store.audit(user_id, "system", "insights.summary", {"generated_by": result["generated_by"]})
         return result | {"disclaimer": report.disclaimer}
+
+    @app.get("/v1/report/clinician", response_class=HTMLResponse)
+    def clinician_report(include_shared: bool = Query(
+            True, description="Include history that linked relatives share with you"),
+                         user_id: str = Depends(current_user)) -> HTMLResponse:
+        """Print-ready summary for the patient to give their clinician (the app makes it a PDF)."""
+        profile = effective_profile(store, user_id) if include_shared else store.get_profile(user_id)
+        html = clinician_report_html(profile, generate_insights(profile), shared_included=include_shared)
+        store.audit(user_id, "user", "report.clinician", {"include_shared": include_shared})
+        return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
     # --- consent, sharing, portability ---------------------------------------------
     @app.get("/v1/consents")

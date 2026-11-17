@@ -87,6 +87,7 @@
       <div class="row">
         <button id="load-fhir">Import sample FHIR record</button>
         <button id="reset">Start over</button>
+        <button id="doctor">Doctor summary</button>
       </div>
       <p id="status" class="muted"></p>
     </section>
@@ -268,6 +269,14 @@ $("load-fhir").onclick = async () => {
   const r = await api("/v1/ingest/fhir", { method: "POST", body: JSON.stringify(bundle) });
   status(`Imported ${r.merged.observations} lab results and ${r.merged.relatives_added} relatives.`);
   await refresh();
+};
+$("doctor").onclick = async () => {
+  // Opens a print-ready summary for your clinician (use the browser's Print → Save as PDF).
+  if (!token) await ensureUser();
+  const res = await fetch("/v1/report/clinician", { headers: { Authorization: "Bearer " + token } });
+  if (!res.ok) { status("Couldn't create the summary."); return; }
+  const url = URL.createObjectURL(new Blob([await res.text()], { type: "text/html" }));
+  window.open(url, "_blank", "noopener");
 };
 $("reset").onclick = async () => {
   if (token) await api("/v1/me", { method: "DELETE" }).catch(() => {});

@@ -4,6 +4,7 @@ import { Text, View } from 'react-native';
 
 import { Badge, Check, Progress, Row, Section } from '../../components/list';
 import { Banner, Body, Button, Card, ErrorText, H2, Loading, Screen, styles } from '../../components/ui';
+import { shareDoctorSummary } from '../../lib/doctorSummary';
 import { pushSupport } from '../../lib/push';
 import { useSession } from '../../lib/session';
 import { LEVEL_LABEL, usePalette } from '../../lib/theme';
@@ -51,6 +52,8 @@ export default function HomeScreen() {
   });
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryBusy, setSummaryBusy] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   if (!data) return <Screen>{error ? <ErrorText>{error}</ErrorText> : <Loading />}</Screen>;
   const { report, notes, steps } = data;
@@ -115,18 +118,27 @@ export default function HomeScreen() {
 
       {report.insights.length > 0 && (
         <Card>
-          <H2>Summary for your clinician</H2>
-          {summary ? <Body>{summary}</Body> : (
-            <Body muted>A short, plain-language summary you can show at your next appointment.</Body>
-          )}
-          {!summary && (
-            <View style={styles.row}>
-              <Button title="Create summary" busy={summaryBusy} onPress={async () => {
+          <H2>Share with your doctor</H2>
+          <Body muted>
+            A one-page summary written for clinicians: the items to discuss with the guidelines behind them,
+            a family pedigree, and your history. It’s made into a PDF on your phone for you to send or print.
+          </Body>
+          <View style={styles.row}>
+            <Button title="Create PDF summary" variant="primary" busy={pdfBusy} onPress={async () => {
+              setPdfBusy(true); setPdfError(null);
+              try { await shareDoctorSummary(api); }
+              catch (e) { setPdfError(e instanceof Error ? e.message : String(e)); }
+              finally { setPdfBusy(false); }
+            }} />
+            {!summary && (
+              <Button title="Plain-language version" busy={summaryBusy} onPress={async () => {
                 setSummaryBusy(true);
                 try { setSummary((await api.summary()).text); } finally { setSummaryBusy(false); }
               }} />
-            </View>
-          )}
+            )}
+          </View>
+          <ErrorText>{pdfError}</ErrorText>
+          {summary && <Body style={{ marginTop: 10 }}>{summary}</Body>}
         </Card>
       )}
 
