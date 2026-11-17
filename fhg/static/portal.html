@@ -127,11 +127,19 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function statusOptions(x) {
+  const opts = [["identified", "Identified"], ["referred", partnerDir.length ? "Referred (in-house)" : "Referred"],
+    ...partnerDir.map((p) => [`referred|${p.id}`, `Referred to ${p.name}`]),
+    ["scheduled", "Scheduled"], ["completed", "Completed"], ["declined", "Declined"]];
+  const current = x.referral === "referred" && x.partner
+    ? `referred|${(partnerDir.find((p) => p.name === x.partner) || {}).id}` : x.referral;
+  return opts.map(([v, l]) => `<option value="${esc(v)}" ${v === current ? "selected" : ""} ${v === "identified" ? "disabled" : ""}>${esc(l)}</option>`).join("");
+}
 const STATUS_OPTS = [["identified", "Identified"], ["referred", "Referred"], ["scheduled", "Scheduled"],
                      ["completed", "Completed"], ["declined", "Declined"]];
 const PRIORITY = { high: "Discuss soon", moderate: "Next visit", info: "Awareness", none: "No action" };
 const KEY = "fhg_portal_token";
-let token = null, orgs = [], orgId = null, data = null;
+let token = null, orgs = [], orgId = null, data = null, partnerDir = [];
 try { token = localStorage.getItem(KEY); } catch (e) {}
 const status = (m) => { $("status").textContent = m || ""; };
 const show = (id, on) => $(id).classList.toggle("hidden", !on);
@@ -162,7 +170,7 @@ async function render() {
 }
 
 async function loadOrg() {
-  data = await api(`/v1/orgs/${orgId}/patients`);
+  [data, partnerDir] = await Promise.all([api(`/v1/orgs/${orgId}/patients`), api("/v1/referral-partners")]);
   const org = data.org, im = data.impact;
   document.title = `${org.name} · Clinic Portal`;
   $("patient-code").textContent = org.patient_code;
@@ -200,16 +208,19 @@ function renderRows() {
       <td><span class="badge b-${esc(p.priority)}">${PRIORITY[p.priority]}</span></td>
       <td>${p.flags.map((x) => `<div class="flag"><span class="chip" title="${esc(x.title)}">${esc(x.program)}</span>
         <select class="st-${esc(x.referral)}" data-pref="${esc(p.patient_ref)}" data-rule="${esc(x.rule_id)}" aria-label="Referral status for ${esc(x.program)}">
-          ${STATUS_OPTS.map(([v, l]) => `<option value="${v}" ${v === x.referral ? "selected" : ""} ${v === "identified" ? "disabled" : ""}>${l}</option>`).join("")}
-        </select></div>`).join("") || '<span class="muted">—</span>'}</td>
+          ${statusOptions(x)}
+        </select>${x.partner && x.referral !== "referred" ? `<span class="muted" style="font-size:12px">via ${esc(x.partner)}</span>` : ""}</div>`).join("") || '<span class="muted">—</span>'}</td>
       <td><span class="meter"><span style="width:${p.completeness}%"></span></span><span class="muted">${p.completeness}%</span></td>
       <td class="act"><button data-ref="${esc(p.patient_ref)}">Summary</button></td>
     </tr>`).join("") : `<tr><td colspan="5" class="muted">${data.patients.length ? "No patients in this program." : "No patients connected yet. Share your patient code, or load demo patients."}</td></tr>`;
   document.querySelectorAll("select[data-rule]").forEach((sel) => sel.onchange = async () => {
     sel.disabled = true;
+    // "referred|<partner id>" routes to a partner; plain "referred" keeps it in-house.
+    const [st, partner] = sel.value.split("|");
+    const body = { rule_id: sel.dataset.rule, status: st };
+    if (st === "referred") body.partner_id = partner || null;
     try {
-      await api(`/v1/orgs/${orgId}/patients/${sel.dataset.pref}/referrals`, { method: "POST",
-        body: JSON.stringify({ rule_id: sel.dataset.rule, status: sel.value }) });
+      await api(`/v1/orgs/${orgId}/patients/${sel.dataset.pref}/referrals`, { method: "POST", body: JSON.stringify(body) });
       status("Referral updated."); await loadOrg();
     } catch (e) { status("Error: " + e.message); sel.disabled = false; }
   });

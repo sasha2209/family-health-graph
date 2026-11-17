@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import auth, clinic, push
+from . import auth, clinic, partners, push
 from .clinician_report import render_html as clinician_report_html
 from .family_links import (
     SHARE_LEVELS,
@@ -180,6 +180,19 @@ class ReferralIn(BaseModel):
     rule_id: str = Field(..., max_length=60)
     status: str = Field(..., pattern="^(referred|scheduled|completed|declined)$")
     note: Optional[str] = Field(None, max_length=500)
+    # Route to a referral partner (null = handled in-house). Omit to keep the current routing.
+    partner_id: Optional[str] = Field(None, max_length=40)
+
+
+class PartnerIn(BaseModel):
+    name: str = Field(..., min_length=2, max_length=120)
+    kind: str = Field("other", pattern="^(" + "|".join(partners.PARTNER_KINDS) + ")$")
+    webhook_url: Optional[str] = Field(None, max_length=500, pattern=r"^https?://\S+$")
+
+
+class PartnerStatusIn(BaseModel):
+    status: str = Field(..., pattern="^(" + "|".join(partners.PARTNER_STATUSES) + ")$")
+    note: Optional[str] = Field(None, max_length=500)
 
 
 class ShareIn(BaseModel):
@@ -194,7 +207,9 @@ def create_app(settings: Optional[Settings] = None,
                email_sender: Optional[auth.EmailSender] = None,
                oidc_key_resolver: Optional[auth.KeyResolver] = None,
                push_sender: Optional[push.PushSender] = None,
-               push_in_background: bool = True) -> FastAPI:
+               push_in_background: bool = True,
+               webhook_sender: Optional[partners.WebhookSender] = None,
+               webhooks_in_background: bool = True) -> FastAPI:
     settings = settings or Settings.from_env()
     email_sender = email_sender or auth.email_sender_from_env()
     if settings.auth_secret == Settings.auth_secret:
@@ -208,6 +223,8 @@ def create_app(settings: Optional[Settings] = None,
     )
     app.state.store = store
     notifier = push.Notifier(store, push_sender or push.push_sender_from_env(), background=push_in_background)
+    partner_hooks = partners.PartnerNotifier(store, webhook_sender or partners.HttpWebhookSender(),
+                                             background=webhooks_in_background)
     if settings.cors_origins:
         app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins),
                            allow_methods=["*"], allow_headers=["Authorization", "Content-Type"])
@@ -554,18 +571,23 @@ def create_app(settings: Optional[Settings] = None,
 
     def org_referrals(org_id: str) -> list[dict]:
         refs = store.referrals_for_org(org_id)
+        names = {p["id"]: p["name"] for p in store.partners(active_only=False)}
         for r in refs:  # expose the per-clinic pseudonym, never the internal user id
             r["user_ref"] = clinic.patient_ref(settings.auth_secret, org_id, r.pop("user_id"))
+            r["partner_name"] = names.get(r.get("partner_id"))
         return refs
 
     def org_rows(org_id: str) -> list[tuple[dict, dict, HealthProfile]]:
-        status_by = {(r["user_ref"], r["rule_id"]): r["status"] for r in org_referrals(org_id)}
+        refs = org_referrals(org_id)
+        status_by = {(r["user_ref"], r["rule_id"]): r["status"] for r in refs}
+        partner_by = {(r["user_ref"], r["rule_id"]): r["partner_name"] for r in refs if r["partner_name"]}
         out = []
         for p in store.org_patients(org_id):
             profile = effective_profile(store, p["user_id"])
             ref = clinic.patient_ref(settings.auth_secret, org_id, p["user_id"])
             row = clinic.patient_row(ref, p["display"], p["connected_at"], profile, generate_insights(profile),
                                      referrals={rule: st for (pr, rule), st in status_by.items() if pr == ref},
+                                     referral_partners={rule: n for (pr, rule), n in partner_by.items() if pr == ref},
                                      source=p["source"])
             out.append((row, p, profile))
         return out
@@ -592,19 +614,135 @@ def create_app(settings: Optional[Settings] = None,
             raise HTTPException(404, "No such patient")
         before = next((r["status"] for r in store.referrals_for_patient(patient["user_id"])
                        if r["org_id"] == org_id and r["rule_id"] == body.rule_id), None)
+        route: dict = {}
+        if "partner_id" in body.model_fields_set:
+            if body.partner_id is not None:
+                partner = store.partner(body.partner_id)
+                if partner is None or not partner["active"]:
+                    raise HTTPException(422, "Unknown or inactive referral partner")
+            route = {"partner_id": body.partner_id}
+        previous = next((r for r in store.referrals_for_org(org_id)
+                         if r["user_id"] == patient["user_id"] and r["rule_id"] == body.rule_id), None)
         referral = store.set_referral_status(org_id, patient["user_id"], body.rule_id, body.status,
-                                             user_id, body.note)
+                                             user_id, body.note, **route)
+        if referral.get("partner_id"):
+            newly_routed = not previous or previous.get("partner_id") != referral["partner_id"]
+            partner_hooks.notify(referral["partner_id"], "referral.created" if newly_routed else "referral.updated",
+                                 referral["id"])
+            store.audit(patient["user_id"], f"org:{org_id}", "clinic.referral_sent_to_partner",
+                        {"partner": store.partner(referral["partner_id"])["name"],
+                         "program": clinic.PROGRAMS[body.rule_id]})
         store.audit(patient["user_id"], f"org:{org_id}", "clinic.referral",
                     {"org": org["name"], "program": clinic.PROGRAMS[body.rule_id], "status": body.status})
         if body.status in ("referred", "scheduled") and body.status != before:
             verb = "referred you for" if body.status == "referred" else "scheduled your"
+            routed = store.partner(referral["partner_id"]) if referral.get("partner_id") else None
             notifier.notify(patient["user_id"], "referral",
-                            f"{org['name']} {verb}: {clinic.PROGRAMS[body.rule_id]}. "
-                            "Contact your clinic if you have questions.")
+                            f"{org['name']} {verb}: {clinic.PROGRAMS[body.rule_id]}"
+                            + (f", with {routed['name']}" if routed else "")
+                            + ". Contact your clinic if you have questions.")
         referral.pop("user_id", None)
         for e in referral["history"]:
-            e["by_you"] = e.pop("by_user") == user_id
+            by = e.pop("by_user")
+            e["by_you"], e["by_partner"] = by == user_id, by.startswith("partner:")
         return {"patient_ref": patient_ref, "program": clinic.PROGRAMS[body.rule_id], **referral}
+
+    @app.get("/v1/referral-partners")
+    def referral_partner_directory(user_id: str = Depends(current_user)) -> list[dict]:
+        """Partners clinic staff can refer to (vetted and contracted by the platform)."""
+        if not store.orgs_for_staff(user_id):
+            raise HTTPException(403, "Only clinic staff can see referral partners")
+        return [{"id": p["id"], "name": p["name"], "kind": p["kind"]} for p in store.partners()]
+
+    # --- partner API (authenticated with the partner's API key) ---------------------------
+    def current_partner(x_api_key: Optional[str] = Header(None)) -> dict:
+        partner = store.partner_for_key(x_api_key) if x_api_key else None
+        if partner is None:
+            raise HTTPException(401, "Missing or invalid API key")
+        return partner
+
+    def partner_view(partner: dict, r: dict, profile: Optional[HealthProfile] = None) -> dict:
+        org = store.org(r["org_id"])
+        display = next((p["display"] for p in store.org_patients(r["org_id"]) if p["user_id"] == r["user_id"]), "")
+        profile = profile or effective_profile(store, r["user_id"])
+        insight = next((i for i in generate_insights(profile).insights if i.rule_id == r["rule_id"]), None)
+        program = clinic.PROGRAMS.get(r["rule_id"], r["rule_id"])
+        return {
+            "referral_id": r["id"], "status": r["status"], "program": program, "rule_id": r["rule_id"],
+            "clinic": {"id": org["id"], "name": org["name"]}, "patient": {"display_name": display},
+            "created_at": r["created_at"], "updated_at": r["updated_at"],
+            "history": [{"status": e["status"], "at": e["at"], "note": e["note"],
+                         "by": "partner" if e["by_user"].startswith("partner:") else "clinic"} for e in r["history"]],
+            "service_request": partners.service_request(
+                r, program, org["name"], partner["name"], display,
+                insight.title if insight else None, insight.evidence if insight else []),
+        }
+
+    def partner_referral_or_404(partner: dict, referral_id: str) -> dict:
+        r = store.referral(referral_id)
+        if r is None or r.get("partner_id") != partner["id"]:
+            raise HTTPException(404, "No such referral")
+        return r
+
+    @app.get("/v1/partner/referrals")
+    def partner_referrals(status: Optional[str] = Query(None), partner: dict = Depends(current_partner)) -> dict:
+        refs = [r for r in store.referrals_for_partner(partner["id"]) if not status or r["status"] == status]
+        out = []
+        for r in refs:
+            out.append(partner_view(partner, r))
+            store.audit(r["user_id"], f"partner:{partner['id']}", "partner.viewed_referral",
+                        {"partner": partner["name"]})
+        return {"partner": {"id": partner["id"], "name": partner["name"]}, "referrals": out}
+
+    @app.get("/v1/partner/referrals/{referral_id}")
+    def partner_referral(referral_id: str, partner: dict = Depends(current_partner)) -> dict:
+        r = partner_referral_or_404(partner, referral_id)
+        store.audit(r["user_id"], f"partner:{partner['id']}", "partner.viewed_referral", {"partner": partner["name"]})
+        return partner_view(partner, r)
+
+    @app.get("/v1/partner/referrals/{referral_id}/summary", response_class=HTMLResponse)
+    def partner_referral_summary(referral_id: str, partner: dict = Depends(current_partner)) -> HTMLResponse:
+        r = partner_referral_or_404(partner, referral_id)
+        profile = effective_profile(store, r["user_id"])
+        store.audit(r["user_id"], f"partner:{partner['id']}", "partner.viewed_summary", {"partner": partner["name"]})
+        return HTMLResponse(clinician_report_html(profile, generate_insights(profile)),
+                            headers={"Cache-Control": "no-store"})
+
+    @app.post("/v1/partner/referrals/{referral_id}/status")
+    def partner_update_status(referral_id: str, body: PartnerStatusIn,
+                              partner: dict = Depends(current_partner)) -> dict:
+        r = partner_referral_or_404(partner, referral_id)
+        updated = store.set_referral_status(r["org_id"], r["user_id"], r["rule_id"], body.status,
+                                            f"partner:{partner['id']}", body.note)
+        program = clinic.PROGRAMS.get(r["rule_id"], r["rule_id"])
+        store.audit(r["user_id"], f"partner:{partner['id']}", "partner.updated_referral",
+                    {"partner": partner["name"], "program": program, "status": body.status})
+        if body.status == "scheduled" and r["status"] != "scheduled":
+            notifier.notify(r["user_id"], "referral",
+                            f"{partner['name']} scheduled your appointment: {program}. "
+                            "They or your clinic will be in touch with details.")
+        return partner_view(partner, updated)
+
+    # --- platform admin: manage referral partners -------------------------------------------
+    def require_admin(x_admin_key: Optional[str] = Header(None)) -> None:
+        if not settings.admin_key or not x_admin_key or not constant_time_equals(x_admin_key, settings.admin_key):
+            raise HTTPException(403, "Admin key required")
+
+    @app.post("/admin/partners", status_code=201, dependencies=[Depends(require_admin)])
+    def admin_create_partner(body: PartnerIn) -> dict:
+        partner, api_key, secret = store.create_partner(body.name.strip(), body.kind, body.webhook_url)
+        return {"partner": partner, "api_key": api_key, "webhook_secret": secret,
+                "note": "Store the API key and webhook secret securely; they are shown only once."}
+
+    @app.get("/admin/partners", dependencies=[Depends(require_admin)])
+    def admin_list_partners() -> list[dict]:
+        return store.partners(active_only=False)
+
+    @app.post("/admin/partners/{partner_id}/deactivate", dependencies=[Depends(require_admin)])
+    def admin_deactivate_partner(partner_id: str) -> dict:
+        if not store.set_partner_active(partner_id, False):
+            raise HTTPException(404, "No such partner")
+        return store.partner(partner_id)
 
     @app.get("/v1/referrals")
     def my_referrals(user_id: str = Depends(current_user)) -> list[dict]:

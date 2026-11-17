@@ -24,7 +24,7 @@ is in **[mobile/](mobile/README.md)**.
 cd family-health-graph
 pip install -r requirements.txt
 python -m fhg            # http://127.0.0.1:8000  (dashboard)  ·  /docs (OpenAPI)
-python -m pytest -q      # 129 tests
+python -m pytest -q      # 136 tests
 ```
 
 CI (`.github/workflows/ci.yml`) runs the backend tests and the mobile app's typecheck, lint and tests on every pull request.
@@ -129,6 +129,9 @@ Design principles:
 | `POST /v1/orgs` · `POST /v1/orgs/join` · `GET /v1/orgs` | Create a clinic, join as staff with the staff code, list your clinics |
 | `GET /v1/orgs/{id}/patients` · `GET /v1/orgs/{id}/patients/{ref}/report` | Clinic worklist with impact metrics; a patient's clinician summary (logged in the patient's audit trail) |
 | `POST /v1/orgs/{id}/patients/{ref}/referrals` | Staff: set a care program's referral status (referred / scheduled / completed / declined), with an optional encrypted note; notifies the patient |
+| `GET /v1/referral-partners` | Staff: partners a clinic can refer to |
+| `GET /v1/partner/referrals` · `GET /v1/partner/referrals/{id}` · `…/{id}/summary` · `POST …/{id}/status` | **Partner API** (`X-API-Key`): referrals routed to you as FHIR `ServiceRequest`s, the clinician summary, and outcome reporting. See [docs/PARTNER_API.md](docs/PARTNER_API.md) |
+| `POST /admin/partners` · `GET /admin/partners` · `POST /admin/partners/{id}/deactivate` | Operator (`X-Admin-Key`): onboard referral partners (returns API key and webhook secret once) |
 | `GET /v1/referrals` | Patient: referrals your clinics have made for you |
 | `GET /c/{code}` · `GET /c/{code}/qr.svg` · `GET /c/{code}/poster` | Clinic **pre-visit intake link**: a no-install web intake, its QR code, and a printable waiting-room poster |
 | `GET /v1/public/clinics/{code}` | Public: a clinic's name from its patient code (for the intake page) |
