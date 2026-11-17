@@ -1,29 +1,76 @@
-import { router } from 'expo-router';
+import { Href, router } from 'expo-router';
 import { useState } from 'react';
-import { View } from 'react-native';
+import { Text, View } from 'react-native';
 
-import { InsightCard } from '../../components/InsightCard';
+import { Badge, Check, Progress, Row, Section } from '../../components/list';
 import { Banner, Body, Button, Card, ErrorText, H2, Loading, Screen, styles } from '../../components/ui';
+import { pushSupport } from '../../lib/push';
 import { useSession } from '../../lib/session';
+import { LEVEL_LABEL, usePalette } from '../../lib/theme';
 import { useLoader } from '../../lib/useLoader';
 
-export default function InsightsScreen() {
+const GRANDPARENT = /grand(mother|father)$/;
+
+function greeting(): string {
+  const h = new Date().getHours();
+  return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+}
+
+/**
+ * Home: a greeting, family alerts, a "next steps" checklist that builds a
+ * useful record, and insights as a scannable list of action items that open
+ * a detail page. Layout follows Foo Medical's patient-portal home and care-plan
+ * patterns.
+ */
+export default function HomeScreen() {
+  const c = usePalette();
   const { api } = useSession();
   const { data, error, refreshing, reload } = useLoader(async () => {
-    const [report, notes, own] = await Promise.all([api.insights(), api.notifications(), api.profile(false)]);
-    // Prompt based on the user's *own* record: someone who just joined through an
-    // invite already sees their linked relative, but hasn't added anything yet.
-    const hasOwnHistory = own.family.length > 0 || own.conditions.length > 0;
-    return { report, notes: notes.filter((n) => !n.read), hasOwnHistory };
+    const [report, notes, own, links, me, push] = await Promise.all([
+      api.insights(), api.notifications(), api.profile(false), api.links(), api.me(), api.pushStatus()]);
+    const rels = new Set(own.family.map((m) => m.relationship));
+    const steps: { title: string; detail: string; done: boolean; href: Href }[] = [
+      { title: 'Add your family’s health history', detail: 'Start with what you know. A sentence or two is fine.',
+        done: own.family.length > 0, href: '/add-history' },
+      { title: 'Add both parents', detail: 'Parents’ diagnoses, and their ages, matter most.',
+        done: rels.has('mother') && rels.has('father'), href: '/add-history' },
+      { title: 'Add your grandparents', detail: 'Patterns on one side of the family change screening advice.',
+        done: [...rels].some((r) => GRANDPARENT.test(r)), href: '/add-history' },
+      { title: 'Add your date of birth and sex', detail: 'So age- and sex-specific guidance applies.',
+        done: !!own.birth_date && !!own.sex, href: '/settings' },
+      { title: 'Invite a relative', detail: 'Their own history makes both of your insights more accurate.',
+        done: links.length > 0, href: '/invite' },
+      { title: 'Protect your account', detail: 'Add your email so you can sign in on another phone.',
+        done: me.secured, href: { pathname: '/sign-in', params: { mode: 'link' } } },
+    ];
+    if (pushSupport().ok) {
+      steps.push({ title: 'Turn on family alerts', detail: 'Hear when a relative shares something that affects you.',
+                   done: push.registered, href: '/settings' });
+    }
+    return { report, notes: notes.filter((n) => !n.read), steps };
   });
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryBusy, setSummaryBusy] = useState(false);
 
   if (!data) return <Screen>{error ? <ErrorText>{error}</ErrorText> : <Loading />}</Screen>;
-  const { report, notes, hasOwnHistory } = data;
+  const { report, notes, steps } = data;
+  const done = steps.filter((s) => s.done).length;
+  const todo = steps.filter((s) => !s.done);
+  const urgent = report.insights.filter((i) => i.level === 'high').length;
 
   return (
     <Screen refreshing={refreshing} onRefresh={reload}>
+      <View style={{ paddingVertical: 4 }}>
+        <Text accessibilityRole="header" style={{ fontSize: 26, fontWeight: '700', color: c.text }}>{greeting()}</Text>
+        <Body muted style={{ marginTop: 4 }}>
+          {report.insights.length === 0
+            ? 'Add some family history to see what’s worth discussing with your clinician.'
+            : urgent > 0
+              ? `${urgent} ${urgent === 1 ? 'item is' : 'items are'} worth discussing with a clinician soon.`
+              : `You have ${report.insights.length} ${report.insights.length === 1 ? 'item' : 'items'} to review.`}
+        </Body>
+      </View>
+
       <ErrorText>{error}</ErrorText>
 
       {notes.map((n) => (
@@ -35,36 +82,49 @@ export default function InsightsScreen() {
         </View>
       )}
 
-      {!hasOwnHistory && (
-        <Card>
-          <H2>Start with what you know</H2>
-          <Body muted>
-            Type a few sentences about your family’s health, like “My mom had breast cancer at 46”.
-          </Body>
-          <View style={styles.row}>
-            <Button title="Add family history" variant="primary" onPress={() => router.push('/add-history')} />
+      {todo.length > 0 && (
+        <Section title="Next steps" right={<Text style={{ color: c.muted }}>{done} of {steps.length} done</Text>}>
+          <View style={{ paddingHorizontal: 16, paddingBottom: 4 }}>
+            <Progress value={done} total={steps.length} />
           </View>
-        </Card>
+          {/* Show the next three to keep it light; finished steps drop off. */}
+          {todo.slice(0, 3).map((step, i, arr) => (
+            <Row key={step.title} title={step.title} detail={step.detail} leading={<Check done={false} />}
+                 onPress={() => router.push(step.href)} last={i === arr.length - 1} />
+          ))}
+        </Section>
       )}
 
-      {report.insights.map((i) => <InsightCard key={i.rule_id} insight={i} />)}
+      {report.insights.length > 0 && (
+        <Section title="Your action items">
+          {report.insights.map((insight, i) => {
+            const tone = c.level[insight.level];
+            return (
+              <Row
+                key={insight.rule_id}
+                title={insight.title}
+                detail={insight.evidence[0] ?? insight.summary}
+                eyebrow={<Badge label={LEVEL_LABEL[insight.level]} fg={tone.fg} bg={tone.bg} />}
+                onPress={() => router.push({ pathname: '/insight/[id]', params: { id: insight.rule_id } })}
+                last={i === report.insights.length - 1}
+              />
+            );
+          })}
+        </Section>
+      )}
 
       {report.insights.length > 0 && (
         <Card>
-          <H2>Plain-language summary</H2>
+          <H2>Summary for your clinician</H2>
           {summary ? <Body>{summary}</Body> : (
-            <Body muted>A short summary you can show your clinician.</Body>
+            <Body muted>A short, plain-language summary you can show at your next appointment.</Body>
           )}
           {!summary && (
             <View style={styles.row}>
-              <Button
-                title="Summarize"
-                busy={summaryBusy}
-                onPress={async () => {
-                  setSummaryBusy(true);
-                  try { setSummary((await api.summary()).text); } finally { setSummaryBusy(false); }
-                }}
-              />
+              <Button title="Create summary" busy={summaryBusy} onPress={async () => {
+                setSummaryBusy(true);
+                try { setSummary((await api.summary()).text); } finally { setSummaryBusy(false); }
+              }} />
             </View>
           )}
         </Card>
