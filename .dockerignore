@@ -1,0 +1,9 @@
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/.expo
+mobile/dist
+data/
+*.sqlite3
+*.key
+.git

@@ -12,7 +12,7 @@ from typing import Any, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from . import auth, clinic, partners, push
@@ -59,6 +59,8 @@ class Settings:
     ios_app_ids: tuple[str, ...] = ()
     android_package: Optional[str] = None
     android_cert_sha256: tuple[str, ...] = ()
+    # Directory with the mobile app's web build (`expo export --platform web`), served at /app.
+    web_app_dir: Optional[str] = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -72,7 +74,9 @@ class Settings:
             auth_secret=os.environ.get("FHG_AUTH_SECRET", cls.auth_secret),
             apple_audiences=_csv("FHG_APPLE_AUDIENCES"),
             google_audiences=_csv("FHG_GOOGLE_AUDIENCES"),
-            public_url=os.environ.get("FHG_PUBLIC_URL") or None,
+            # Render sets RENDER_EXTERNAL_URL (e.g. https://family-health-graph.onrender.com).
+            public_url=os.environ.get("FHG_PUBLIC_URL") or os.environ.get("RENDER_EXTERNAL_URL") or None,
+            web_app_dir=os.environ.get("FHG_WEB_APP_DIR") or None,
             ios_app_ids=_csv("FHG_IOS_APP_IDS"),
             android_package=os.environ.get("FHG_ANDROID_PACKAGE") or None,
             android_cert_sha256=_csv("FHG_ANDROID_CERT_SHA256"),
@@ -270,6 +274,19 @@ def create_app(settings: Optional[Settings] = None,
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     def index() -> str:
         return (PKG_DIR / "static" / "index.html").read_text()
+
+    if settings.web_app_dir and Path(settings.web_app_dir, "index.html").exists():
+        web_root = Path(settings.web_app_dir).resolve()
+
+        @app.get("/app", include_in_schema=False)
+        @app.get("/app/{path:path}", include_in_schema=False)
+        def web_app(path: str = ""):
+            """The mobile app's web build. Unknown paths fall back to index.html so
+            client-side routes (e.g. /app/invite/<token>) work on reload."""
+            candidate = (web_root / path).resolve()
+            if path and candidate.is_file() and candidate.is_relative_to(web_root):
+                return FileResponse(candidate)
+            return FileResponse(web_root / "index.html", headers={"Cache-Control": "no-cache"})
 
     @app.get("/invite/{token}", response_class=HTMLResponse, include_in_schema=False)
     def invite_page(token: str) -> str:

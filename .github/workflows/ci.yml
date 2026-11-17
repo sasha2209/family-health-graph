@@ -44,3 +44,18 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+
+  docker:
+    name: Docker image (what Render builds)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t fhg:ci .
+      - name: Smoke test the container
+        run: |
+          docker run -d --name fhg -p 8000:8000 -e FHG_ENCRYPTION_KEY=ci-only-secret-that-is-long-enough-123456 fhg:ci
+          for i in $(seq 1 30); do curl -sf localhost:8000/health && break; sleep 1; done
+          curl -sf localhost:8000/health
+          curl -sf localhost:8000/app | grep -q '_expo/static'
+          curl -sf localhost:8000/portal | grep -q 'Clinic portal'

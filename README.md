@@ -18,13 +18,20 @@ is in **[mobile/](mobile/README.md)**.
 
 ---
 
+## Deploy
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/sasha2209/family-health-graph)
+
+One click deploys the API, web dashboard, clinic portal and the mobile app as a web app (`/app`). See
+[docs/DEPLOY.md](docs/DEPLOY.md) for plans, secrets and the steps before real patient data.
+
 ## Quick start
 
 ```bash
 cd family-health-graph
 pip install -r requirements.txt
 python -m fhg            # http://127.0.0.1:8000  (dashboard)  ·  /docs (OpenAPI)
-python -m pytest -q      # 136 tests
+python -m pytest -q      # 138 tests
 ```
 
 CI (`.github/workflows/ci.yml`) runs the backend tests and the mobile app's typecheck, lint and tests on every pull request.
@@ -155,9 +162,10 @@ Design principles:
 | `FHG_APPLE_AUDIENCES` | unset (off) | Your iOS bundle ID (and web Services ID) to enable Sign in with Apple |
 | `FHG_GOOGLE_AUDIENCES` | unset (off) | Your Google OAuth client IDs to enable Sign in with Google |
 | `FHG_PUSH_BACKEND` | `console` | `console` logs pushes; `expo` sends through Expo's push service (`FHG_EXPO_ACCESS_TOKEN` optional, for Expo's enhanced push security) |
-| `FHG_PUBLIC_URL` | request host | Public origin for invite links, e.g. `https://app.example.org` (set this behind a proxy or load balancer) |
+| `FHG_PUBLIC_URL` | `RENDER_EXTERNAL_URL`, else request host | Public origin for invite links, e.g. `https://app.example.org` (set this behind a proxy or load balancer) |
 | `FHG_IOS_APP_IDS` | unset | `TEAMID.bundle.id` values; serves `/.well-known/apple-app-site-association` so invite links open the iOS app |
 | `FHG_ANDROID_PACKAGE`, `FHG_ANDROID_CERT_SHA256` | unset | Android package and signing-certificate SHA-256 fingerprints; serves `/.well-known/assetlinks.json` |
+| `FHG_WEB_APP_DIR` | unset | Directory of the mobile app's web build to serve at `/app` (set in the Docker image) |
 | `FHG_CORS_ORIGINS` | unset | Comma-separated browser origins allowed to call the API (e.g. the Expo web preview) |
 | `FHG_HOST`, `FHG_PORT` | `127.0.0.1`, `8000` | Use `FHG_HOST=0.0.0.0` so a phone on your network can reach the dev server |
 
