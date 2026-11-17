@@ -1,5 +1,7 @@
 import { router } from 'expo-router';
-import { Alert, Platform, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, Text, View } from 'react-native';
+
+import { Badge, Row, Section } from '../../components/list';
 
 import { Body, Button, Card, Chips, ErrorText, H2, Loading, Screen, styles } from '../../components/ui';
 import { capitalize, label, SHARE_OPTIONS, SHARE_SHORT, sideOf } from '../../lib/format';
@@ -16,27 +18,16 @@ function confirm(title: string, message: string, onOk: () => void) {
   Alert.alert(title, message, [{ text: 'Cancel', style: 'cancel' }, { text: 'OK', style: 'destructive', onPress: onOk }]);
 }
 
-function Person({ m }: { m: FamilyMember }) {
-  const c = usePalette();
-  return (
-    <View style={[s.person, { borderColor: c.border, backgroundColor: c.surface }]}>
-      <Text style={[s.side, { color: c.muted }]}>{sideOf(m.relationship).toUpperCase()}</Text>
-      <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
-        <Text style={[s.name, { color: c.text }]}>
-          {capitalize(label(m.relationship))}{m.name ? ` · ${m.name}` : ''}{m.deceased ? ' †' : ''}
-        </Text>
-        {m.linked && <Text style={[s.linked, { color: c.accent, borderColor: c.accent }]}>LINKED</Text>}
-      </View>
-      {m.conditions.length ? m.conditions.map((cond) => (
-        <Text key={cond.id} style={{ color: c.text, fontSize: 14 }}>
-          {cond.name}{cond.onset_age != null ? ` (${cond.age_estimated ? '~' : ''}${cond.onset_age})` : ''}
-        </Text>
-      )) : <Text style={{ color: c.muted, fontSize: 14 }}>No known conditions</Text>}
-    </View>
-  );
+const SIDES = ['Immediate', 'Maternal', 'Paternal', 'Extended'] as const;
+
+function conditionSummary(m: FamilyMember): string {
+  if (!m.conditions.length) return 'No known conditions';
+  return m.conditions.map((cond) =>
+    cond.name + (cond.onset_age != null ? ` (${cond.age_estimated ? '~' : ''}${cond.onset_age})` : '')).join(', ');
 }
 
 export default function FamilyScreen() {
+  const c = usePalette();
   const { api } = useSession();
   const { data, error, refreshing, reload } = useLoader(async () => {
     const [profile, links] = await Promise.all([api.profile(true), api.links()]);
@@ -56,7 +47,24 @@ export default function FamilyScreen() {
       {profile.family.length === 0 ? (
         <Body muted>No relatives yet. Add what you know, or invite a relative to add theirs.</Body>
       ) : (
-        <View style={s.grid}>{profile.family.map((m) => <Person key={m.id} m={m} />)}</View>
+        SIDES.map((side) => {
+          const members = profile.family.filter((m) => sideOf(m.relationship) === side);
+          if (!members.length) return null;
+          return (
+            <Section key={side} title={`${side === 'Immediate' ? 'Immediate family' : `${side} side`}`}
+                     right={<Text style={{ color: c.muted }}>{members.length}</Text>}>
+              {members.map((m, i) => (
+                <Row
+                  key={m.id}
+                  title={`${capitalize(label(m.relationship))}${m.name ? ` · ${m.name}` : ''}${m.deceased ? ' †' : ''}`}
+                  detail={conditionSummary(m)}
+                  badge={m.linked ? <Badge label="Linked" fg={c.accent} bg={c.bg} /> : undefined}
+                  last={i === members.length - 1}
+                />
+              ))}
+            </Section>
+          );
+        })
       )}
 
       <Card>
@@ -89,11 +97,3 @@ export default function FamilyScreen() {
     </Screen>
   );
 }
-
-const s = StyleSheet.create({
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  person: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, padding: 10, flexGrow: 1, flexBasis: 150, gap: 2 },
-  side: { fontSize: 10, letterSpacing: 0.5 },
-  name: { fontSize: 14, fontWeight: '600' },
-  linked: { fontSize: 9, fontWeight: '700', borderWidth: 1, borderRadius: 4, paddingHorizontal: 4 },
-});

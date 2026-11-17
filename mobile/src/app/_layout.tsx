@@ -24,6 +24,7 @@ function RootStack() {
     >
       <Stack.Protected guard={!!token} redirectTo="/welcome">
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="insight/[id]" options={{ title: 'Action item' }} />
         <Stack.Screen name="add-history" options={{ title: 'Add family history', presentation: 'modal' }} />
       </Stack.Protected>
       <Stack.Protected guard={!token} redirectTo="/">

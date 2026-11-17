@@ -23,7 +23,7 @@ export default function TabsLayout() {
         sceneStyle: { backgroundColor: c.bg },
       }}
     >
-      <Tabs.Screen name="index" options={{ title: 'Insights', tabBarIcon: icon('♡') }} />
+      <Tabs.Screen name="index" options={{ title: 'Home', tabBarIcon: icon('♡') }} />
       <Tabs.Screen name="family" options={{ title: 'Family', tabBarIcon: icon('⌂') }} />
       <Tabs.Screen name="invite" options={{ title: 'Invite', tabBarIcon: icon('✉') }} />
       <Tabs.Screen name="settings" options={{ title: 'Settings', tabBarIcon: icon('⚙') }} />
