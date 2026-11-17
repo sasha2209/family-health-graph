@@ -18,6 +18,9 @@ test('link domain adds iOS associated domains and a verified Android intent filt
   assert.equal(out.ios.bundleIdentifier, 'com.example.app');
   const filter = out.android.intentFilters[0];
   assert.equal(filter.autoVerify, true);
-  assert.deepEqual(filter.data, [{ scheme: 'https', host: 'app.example.org', pathPrefix: '/invite/' }]);
+  assert.deepEqual(filter.data, [
+    { scheme: 'https', host: 'app.example.org', pathPrefix: '/invite/' },
+    { scheme: 'https', host: 'app.example.org', pathPrefix: '/c/' },
+  ]);
   delete process.env.EXPO_PUBLIC_LINK_DOMAIN;
 });

@@ -116,8 +116,10 @@ export function createApi(token: string | null) {
       }),
     me: () => authed<Me>('/v1/auth/me'),
     lookupClinic: (code: string) => authed<{ id: string; name: string }>(`/v1/clinics/lookup/${encodeURIComponent(code.trim())}`),
-    connectClinic: (code: string, displayName: string) =>
-      authed<{ id: string; name: string }>('/v1/clinics', { method: 'POST', body: { code: code.trim(), display_name: displayName.trim() } }),
+    connectClinic: (code: string, displayName: string, source: 'code' | 'link' = 'code') =>
+      authed<{ id: string; name: string }>('/v1/clinics', {
+        method: 'POST', body: { code: code.trim(), display_name: displayName.trim(), source },
+      }),
     referrals: () => authed<{ rule_id: string; status: 'referred' | 'scheduled' | 'completed' | 'declined';
       updated_at: string; org_name: string; org_id: string; program: string }[]>('/v1/referrals'),
     clinics: () => authed<{ id: string; name: string; connected_at: string }[]>('/v1/clinics'),
@@ -147,6 +149,7 @@ export const publicApi = {
   previewInvite: (inviteToken: string) => request<InvitePreview>(`/v1/invites/${encodeURIComponent(inviteToken)}`),
   declineInvite: (inviteToken: string) =>
     request<void>(`/v1/invites/${encodeURIComponent(inviteToken)}/decline`, { method: 'POST' }),
+  clinicByCode: (code: string) => request<{ name: string; code: string }>(`/v1/public/clinics/${encodeURIComponent(code)}`),
   sampleRecord: () => request<unknown>('/sample/fhir'),
 };
 

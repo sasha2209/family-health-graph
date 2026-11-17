@@ -35,8 +35,10 @@ A buyer needs three things from us:
 2. ✅ **Referral tracking**: *identified → referred → scheduled → completed* (or declined) per care program,
    a funnel with completion rate and median days to complete, a downloadable pilot report (CSV), and patients
    notified and shown the status in the app.
-3. **Pre-visit intake link**: a clinic link or QR code that takes a new patient straight into the app with
-   the clinic already connected. This is the distribution engine: every visit reminder recruits users.
+3. ✅ **Pre-visit intake link**: a link and QR code per clinic (copy from the portal, add to appointment
+   reminders, or print the waiting-room poster). Patients complete a two-minute web intake with no app or
+   account needed, or open it in the app with the clinic pre-filled. The portal counts "Joined via intake link".
+   This is the distribution engine: every visit reminder recruits users.
 4. **Partner API keys and webhooks**: let a genetic-counseling or testing partner receive consented referrals
    programmatically (FHIR `ServiceRequest`), which is the foundation of per-referral partnerships.
 5. **SMART on FHIR app launch**: open the clinician summary inside Epic or Oracle Health for a patient.

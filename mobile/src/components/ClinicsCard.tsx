@@ -7,11 +7,17 @@ import { Body, Button, Card, ErrorText, Field, H2, styles } from './ui';
 type Clinic = { id: string; name: string; connected_at: string };
 
 /** Connect your record to a clinic (with the code they give you), see who has access, disconnect. */
-export function ClinicsCard({ clinics, onChange }: { clinics: Clinic[]; onChange: () => void }) {
+export function ClinicsCard({ clinics, onChange, initialCode, initialName, source = 'code' }: {
+  clinics: Clinic[];
+  onChange: () => void;
+  initialCode?: string;
+  initialName?: string; // clinic name already looked up (from an intake link)
+  source?: 'code' | 'link';
+}) {
   const { api } = useSession();
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState(initialCode ?? '');
   const [name, setName] = useState('');
-  const [found, setFound] = useState<string | null>(null);
+  const [found, setFound] = useState<string | null>(initialName ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,7 +58,7 @@ export function ClinicsCard({ clinics, onChange }: { clinics: Clinic[]; onChange
           <View style={styles.row}>
             <Button title="Connect" variant="primary" busy={busy} disabled={name.trim().length < 2}
                     onPress={() => run(async () => {
-                      await api.connectClinic(code, name); setFound(null); setCode(''); setName(''); onChange();
+                      await api.connectClinic(code, name, source); setFound(null); setCode(''); setName(''); onChange();
                     })} />
             <Button title="Cancel" onPress={() => { setFound(null); setError(null); }} />
           </View>

@@ -14,7 +14,10 @@ module.exports = ({ config }) => {
         {
           action: 'VIEW',
           autoVerify: true,
-          data: [{ scheme: 'https', host: domain, pathPrefix: '/invite/' }],
+          data: [
+            { scheme: 'https', host: domain, pathPrefix: '/invite/' },
+            { scheme: 'https', host: domain, pathPrefix: '/c/' }, // clinic intake links
+          ],
           category: ['BROWSABLE', 'DEFAULT'],
         },
       ],
