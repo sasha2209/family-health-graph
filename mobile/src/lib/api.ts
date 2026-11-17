@@ -36,6 +36,18 @@ export class ApiError extends Error {
 
 type Options = { method?: string; body?: unknown; token?: string | null };
 
+/** GET that returns text (e.g. the HTML clinician summary) instead of JSON. */
+async function requestText(path: string, token: string | null): Promise<string> {
+  let res: Response;
+  try {
+    res = await fetch(API_URL + path, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  } catch {
+    throw new ApiError(0, `Can't reach the server at ${API_URL}. Check your connection.`);
+  }
+  if (!res.ok) throw new ApiError(res.status, res.statusText || 'Request failed');
+  return res.text();
+}
+
 async function request<T>(path: string, { method = 'GET', body, token }: Options = {}): Promise<T> {
   let res: Response;
   try {
@@ -72,6 +84,8 @@ export function createApi(token: string | null) {
     setDemographics: (body: { sex?: Sex; birth_date?: string }) =>
       authed<Profile>('/v1/profile/demographics', { method: 'PUT', body }),
     insights: () => authed<InsightReport>('/v1/insights'),
+    clinicianReport: (includeShared = true) =>
+      requestText(`/v1/report/clinician?include_shared=${includeShared}`, token),
     summary: () => authed<{ text: string; generated_by: string; disclaimer: string }>('/v1/insights/summary'),
     ingestText: (text: string, preview = false) =>
       authed<IngestResult>(`/v1/ingest/text${preview ? '?preview=true' : ''}`, { method: 'POST', body: { text } }),
