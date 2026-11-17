@@ -67,8 +67,10 @@ def completeness(profile: HealthProfile) -> int:
 
 def patient_row(ref: str, display: str, connected_at: str, profile: HealthProfile,
                 report: InsightReport, today: Optional[date] = None,
-                referrals: Optional[dict[str, str]] = None, source: str = "code") -> dict:
+                referrals: Optional[dict[str, str]] = None, source: str = "code",
+                referral_partners: Optional[dict[str, str]] = None) -> dict:
     referrals = referrals or {}
+    referral_partners = referral_partners or {}
     flags = [i for i in report.insights if i.rule_id in PROGRAMS]
     top = min((LEVEL_ORDER[i.level] for i in flags), default=3)
     return {
@@ -80,7 +82,8 @@ def patient_row(ref: str, display: str, connected_at: str, profile: HealthProfil
         "joined_via": source,
         "priority": ["high", "moderate", "info", "none"][top],
         "flags": [{"rule_id": i.rule_id, "level": i.level.value, "title": i.title,
-                   "program": PROGRAMS[i.rule_id], "referral": referrals.get(i.rule_id, "identified")}
+                   "program": PROGRAMS[i.rule_id], "referral": referrals.get(i.rule_id, "identified"),
+                   "partner": referral_partners.get(i.rule_id)}
                   for i in flags],
         "relatives": len(profile.family),
         "completeness": completeness(profile),

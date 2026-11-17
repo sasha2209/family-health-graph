@@ -39,8 +39,10 @@ A buyer needs three things from us:
    reminders, or print the waiting-room poster). Patients complete a two-minute web intake with no app or
    account needed, or open it in the app with the clinic pre-filled. The portal counts "Joined via intake link".
    This is the distribution engine: every visit reminder recruits users.
-4. **Partner API keys and webhooks**: let a genetic-counseling or testing partner receive consented referrals
-   programmatically (FHIR `ServiceRequest`), which is the foundation of per-referral partnerships.
+4. ✅ **Partner API**: genetic-counseling, testing and other partners receive referrals as FHIR `ServiceRequest`s
+   (API key, signed health-data-free webhooks) and report *scheduled / completed / declined* back, which updates
+   the clinic's funnel and the patient's app. See `PARTNER_API.md`. This is the foundation of platform-fee
+   partnerships with testing and counseling companies.
 5. **SMART on FHIR app launch**: open the clinician summary inside Epic or Oracle Health for a patient.
    Big for health-system sales, but it needs a sandbox account.
 6. **Pilot report as a PDF** (the CSV export exists): a one-page summary of the impact numbers for the clinic's leadership and for investors.

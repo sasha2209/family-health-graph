@@ -57,7 +57,7 @@ export default function InsightDetail() {
         <Section title="From your care team">
           {referrals.map((r, i) => (
             <Row key={r.org_id} title={`${r.org_name}: ${REFERRAL_LABEL[r.status] ?? r.status}`}
-                 detail={`${r.program} · updated ${new Date(r.updated_at).toLocaleDateString()}`}
+                 detail={`${r.program}${r.partner_name ? ` · with ${r.partner_name}` : ''} · updated ${new Date(r.updated_at).toLocaleDateString()}`}
                  last={i === referrals.length - 1} />
           ))}
         </Section>

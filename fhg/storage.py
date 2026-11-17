@@ -80,6 +80,18 @@ CREATE TABLE IF NOT EXISTS org_patients (
     source TEXT,                    -- how they joined: 'code' (typed in the app) or 'link' (intake link/QR)
     PRIMARY KEY (org_id, user_id)
 );
+-- Referral partners (e.g. genetic counseling, testing labs) vetted by the platform.
+-- They authenticate with an API key (hash stored) and get signed, PHI-free webhooks.
+CREATE TABLE IF NOT EXISTS partners (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    api_key_hash TEXT NOT NULL UNIQUE,
+    webhook_url TEXT,
+    webhook_secret BLOB,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+);
 -- One referral per (clinic, patient, care program); every status change is an event.
 CREATE TABLE IF NOT EXISTS referrals (
     id TEXT PRIMARY KEY,
@@ -194,6 +206,7 @@ class Store:
         self._lock = threading.RLock()
         self._migrate_legacy_tokens()
         self._add_column_if_missing("org_patients", "source", "TEXT")
+        self._add_column_if_missing("referrals", "partner_id", "TEXT REFERENCES partners(id)")
 
     def _add_column_if_missing(self, table: str, column: str, decl: str) -> None:
         cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
@@ -340,8 +353,12 @@ class Store:
                                       (org_id, user_id)).rowcount == 1
 
     # --- referrals --------------------------------------------------------------------
+    _KEEP = object()
+
     def set_referral_status(self, org_id: str, user_id: str, rule_id: str, status: str,
-                            by_user: str, note: Optional[str]) -> dict:
+                            by_user: str, note: Optional[str], partner_id=_KEEP) -> dict:
+        """Create or update a referral. ``partner_id`` routes it to a referral
+        partner (None = handled in-house); leave it out to keep the current one."""
         now = _now()
         with self._lock, self._conn:
             row = self._conn.execute("SELECT id FROM referrals WHERE org_id = ? AND user_id = ? AND rule_id = ?",
@@ -355,6 +372,8 @@ class Store:
                 self._conn.execute(
                     "INSERT INTO referrals (id, org_id, user_id, rule_id, status, created_at, updated_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?)", (ref_id, org_id, user_id, rule_id, status, now, now))
+            if partner_id is not Store._KEEP:
+                self._conn.execute("UPDATE referrals SET partner_id = ? WHERE id = ?", (partner_id, ref_id))
             self._conn.execute(
                 "INSERT INTO referral_events (referral_id, status, note, by_user, at) VALUES (?, ?, ?, ?, ?)",
                 (ref_id, status, self._cipher.encrypt(note) if note else None, by_user, now))
@@ -376,10 +395,50 @@ class Store:
         return [self.referral(r["id"]) for r in refs]
 
     def referrals_for_patient(self, user_id: str) -> list[dict]:
-        rows = self._query("SELECT r.rule_id, r.status, r.updated_at, o.name AS org_name, o.id AS org_id "
-                           "FROM referrals r JOIN organizations o ON o.id = r.org_id WHERE r.user_id = ? "
+        rows = self._query("SELECT r.rule_id, r.status, r.updated_at, o.name AS org_name, o.id AS org_id, "
+                           "p.name AS partner_name FROM referrals r JOIN organizations o ON o.id = r.org_id "
+                           "LEFT JOIN partners p ON p.id = r.partner_id WHERE r.user_id = ? "
                            "ORDER BY r.updated_at DESC", (user_id,))
         return [dict(r) for r in rows]
+
+    # --- referral partners ------------------------------------------------------------
+    def create_partner(self, name: str, kind: str, webhook_url: Optional[str]) -> tuple[dict, str, str]:
+        """Returns (partner, api_key, webhook_secret); the key and secret are shown once."""
+        partner_id, now = uuid.uuid4().hex[:12], _now()
+        api_key, secret = "fhgp_" + new_token(), "whsec_" + new_token()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO partners (id, name, kind, api_key_hash, webhook_url, webhook_secret, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (partner_id, name, kind, hash_token(api_key), webhook_url, self._cipher.encrypt(secret), now))
+        return self.partner(partner_id), api_key, secret
+
+    def partner(self, partner_id: str) -> Optional[dict]:
+        rows = self._query("SELECT id, name, kind, webhook_url, active, created_at FROM partners WHERE id = ?",
+                           (partner_id,))
+        return dict(rows[0]) if rows else None
+
+    def partners(self, active_only: bool = True) -> list[dict]:
+        rows = self._query("SELECT id, name, kind, webhook_url, active, created_at FROM partners "
+                           + ("WHERE active = 1 " if active_only else "") + "ORDER BY name")
+        return [dict(r) for r in rows]
+
+    def partner_for_key(self, api_key: str) -> Optional[dict]:
+        rows = self._query("SELECT id FROM partners WHERE api_key_hash = ? AND active = 1", (hash_token(api_key),))
+        return self.partner(rows[0]["id"]) if rows else None
+
+    def partner_webhook_secret(self, partner_id: str) -> Optional[str]:
+        rows = self._query("SELECT webhook_secret FROM partners WHERE id = ?", (partner_id,))
+        return self._cipher.decrypt(rows[0]["webhook_secret"]) if rows and rows[0]["webhook_secret"] else None
+
+    def set_partner_active(self, partner_id: str, active: bool) -> bool:
+        with self._lock, self._conn:
+            return self._conn.execute("UPDATE partners SET active = ? WHERE id = ?",
+                                      (1 if active else 0, partner_id)).rowcount == 1
+
+    def referrals_for_partner(self, partner_id: str) -> list[dict]:
+        refs = self._query("SELECT id FROM referrals WHERE partner_id = ? ORDER BY created_at DESC", (partner_id,))
+        return [self.referral(r["id"]) for r in refs]
 
     def org_patients(self, org_id: str) -> list[dict]:
         rows = self._query("SELECT user_id, display, connected_at, source FROM org_patients WHERE org_id = ? "

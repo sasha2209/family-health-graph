@@ -121,7 +121,7 @@ export function createApi(token: string | null) {
         method: 'POST', body: { code: code.trim(), display_name: displayName.trim(), source },
       }),
     referrals: () => authed<{ rule_id: string; status: 'referred' | 'scheduled' | 'completed' | 'declined';
-      updated_at: string; org_name: string; org_id: string; program: string }[]>('/v1/referrals'),
+      updated_at: string; org_name: string; org_id: string; program: string; partner_name: string | null }[]>('/v1/referrals'),
     clinics: () => authed<{ id: string; name: string; connected_at: string }[]>('/v1/clinics'),
     disconnectClinic: (orgId: string) => authed<void>(`/v1/clinics/${encodeURIComponent(orgId)}`, { method: 'DELETE' }),
     registerPush: (token: string, platform: 'ios' | 'android') =>

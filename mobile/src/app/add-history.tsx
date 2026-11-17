@@ -16,6 +16,13 @@ function describe(parsed: Profile): string[] {
   return lines;
 }
 
+// Return to wherever the user came from, or Home if this screen was opened
+// directly (e.g. right after connecting from a clinic's intake link).
+function done() {
+  if (router.canGoBack()) router.back();
+  else router.replace('/');
+}
+
 export default function AddHistory() {
   const { api } = useSession();
   const [text, setText] = useState('');
@@ -53,7 +60,7 @@ export default function AddHistory() {
               setPreview(r.warnings);
               return;
             }
-            router.back();
+            done();
           })} />
         </View>
         <ErrorText>{error}</ErrorText>
@@ -75,7 +82,7 @@ export default function AddHistory() {
         <View style={styles.row}>
           <Button title="Load sample record" onPress={() => run(async () => {
             await api.ingestFhir(await publicApi.sampleRecord());
-            router.back();
+            done();
           })} />
         </View>
       </Card>
