@@ -5,17 +5,18 @@ import hmac
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import auth, clinic, partners, push
+from . import auth, clinic, inbound, partners, push, trends
 from .clinician_report import render_html as clinician_report_html
 from .family_links import (
     compose,
@@ -65,6 +66,14 @@ class Settings:
     android_cert_sha256: tuple[str, ...] = ()
     # Directory with the mobile app's web build (`expo export --platform web`), served at /app.
     web_app_dir: Optional[str] = None
+    # Forwarding documents in (docs/FORWARDING.md).
+    inbound_email_domain: Optional[str] = None     # e.g. "in.example.org"; addresses are <token>@<domain>
+    inbound_email_secret: Optional[str] = None     # shared secret on the inbound-mail webhook URL
+    whatsapp_number: Optional[str] = None          # the business number people message, shown in the app
+    whatsapp_verify_token: Optional[str] = None
+    whatsapp_app_secret: Optional[str] = None
+    whatsapp_access_token: Optional[str] = None
+    whatsapp_phone_number_id: Optional[str] = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -81,6 +90,13 @@ class Settings:
             # Render sets RENDER_EXTERNAL_URL (e.g. https://family-health-graph.onrender.com).
             public_url=os.environ.get("FHG_PUBLIC_URL") or os.environ.get("RENDER_EXTERNAL_URL") or None,
             web_app_dir=os.environ.get("FHG_WEB_APP_DIR") or None,
+            inbound_email_domain=os.environ.get("FHG_INBOUND_EMAIL_DOMAIN") or None,
+            inbound_email_secret=os.environ.get("FHG_INBOUND_EMAIL_SECRET") or None,
+            whatsapp_number=os.environ.get("FHG_WHATSAPP_NUMBER") or None,
+            whatsapp_verify_token=os.environ.get("FHG_WHATSAPP_VERIFY_TOKEN") or None,
+            whatsapp_app_secret=os.environ.get("FHG_WHATSAPP_APP_SECRET") or None,
+            whatsapp_access_token=os.environ.get("FHG_WHATSAPP_ACCESS_TOKEN") or None,
+            whatsapp_phone_number_id=os.environ.get("FHG_WHATSAPP_PHONE_NUMBER_ID") or None,
             ios_app_ids=_csv("FHG_IOS_APP_IDS"),
             android_package=os.environ.get("FHG_ANDROID_PACKAGE") or None,
             android_cert_sha256=_csv("FHG_ANDROID_CERT_SHA256"),
@@ -265,7 +281,8 @@ def create_app(settings: Optional[Settings] = None,
                push_in_background: bool = True,
                webhook_sender: Optional[partners.WebhookSender] = None,
                webhooks_in_background: bool = True,
-               document_ai_client: Optional[object] = None) -> FastAPI:
+               document_ai_client: Optional[object] = None,
+               whatsapp_client: Optional[inbound.WhatsAppClient] = None) -> FastAPI:
     settings = settings or Settings.from_env()
     email_sender = email_sender or auth.email_sender_from_env()
     if settings.auth_secret == Settings.auth_secret:
@@ -629,16 +646,8 @@ def create_app(settings: Optional[Settings] = None,
             out["ai_reason"] = read.ai_reason
         return out
 
-    @app.post("/v1/documents", status_code=201)
-    def upload_document(body: DocumentIn, user_id: str = Depends(current_user)) -> dict:
-        """Read a document and return a draft for review. Nothing is added to the record until it's saved."""
-        import base64
-        import binascii
-
-        try:
-            data = base64.b64decode(body.data_base64.split(",", 1)[-1], validate=False)
-        except (binascii.Error, ValueError) as exc:
-            raise HTTPException(422, "The file isn't valid base64.") from exc
+    def read_and_store(user_id: str, data: bytes, filename: Optional[str], source: str) -> tuple[dict, docs.ReadResult]:
+        """Read one file into a document waiting for review (uploads, email and WhatsApp share this)."""
         if not data:
             raise HTTPException(422, "The file is empty.")
         if len(data) > MAX_DOCUMENT_BYTES:
@@ -653,15 +662,29 @@ def create_app(settings: Optional[Settings] = None,
         e = read.extraction
         doc_id = store.create_document(
             user_id, doc_type=e.doc_type, doc_date=e.doc_date.isoformat() if e.doc_date else None,
-            filename=body.filename, media_type=read.media_type, file=data, text=read.text.text,
+            filename=filename, media_type=read.media_type, file=data, text=read.text.text,
             extraction=e.model_dump(mode="json"), method=read.text.method, ocr_confidence=read.text.confidence,
             ai_model=read.ai.model if read.ai else None, ai_mode=read.ai.mode if read.ai else None,
-            input_tokens=read.ai.input_tokens if read.ai else 0, output_tokens=read.ai.output_tokens if read.ai else 0)
-        store.audit(user_id, "user", "document.uploaded", {
-            "document_id": doc_id, "doc_type": e.doc_type, "method": read.text.method,
+            input_tokens=read.ai.input_tokens if read.ai else 0, output_tokens=read.ai.output_tokens if read.ai else 0,
+            source=source)
+        store.audit(user_id, "user" if source == "upload" else source, "document.uploaded", {
+            "document_id": doc_id, "doc_type": e.doc_type, "method": read.text.method, "source": source,
             "ai": read.ai.model if read.ai else None,
             "tokens": (read.ai.input_tokens + read.ai.output_tokens) if read.ai else 0})
-        return doc_out(store.document(user_id, doc_id), read)
+        return store.document(user_id, doc_id), read
+
+    @app.post("/v1/documents", status_code=201)
+    def upload_document(body: DocumentIn, user_id: str = Depends(current_user)) -> dict:
+        """Read a document and return a draft for review. Nothing is added to the record until it's saved."""
+        import base64
+        import binascii
+
+        try:
+            data = base64.b64decode(body.data_base64.split(",", 1)[-1], validate=False)
+        except (binascii.Error, ValueError) as exc:
+            raise HTTPException(422, "The file isn't valid base64.") from exc
+        doc, read = read_and_store(user_id, data, body.filename, source="upload")
+        return doc_out(doc, read)
 
     @app.get("/v1/documents")
     def list_documents(user_id: str = Depends(current_user)) -> list[dict]:
@@ -760,6 +783,162 @@ def create_app(settings: Optional[Settings] = None,
             raise HTTPException(404, "No such document")
         store.audit(user_id, "user", "document.deleted", {"document_id": doc_id})
         return Response(status_code=204)
+
+    # --- forwarding documents in: email and WhatsApp ----------------------------------------
+    wa_client = whatsapp_client or (
+        inbound.GraphWhatsAppClient(settings.whatsapp_access_token, settings.whatsapp_phone_number_id)
+        if settings.whatsapp_access_token and settings.whatsapp_phone_number_id else None)
+    LINK_CODE_MINUTES = 15
+
+    def link_code_hash(code: str) -> str:
+        return hmac.new(settings.auth_secret.encode(), b"wa-link:" + code.encode(), "sha256").hexdigest()
+
+    def inbound_out(user_id: str) -> dict:
+        row = store.inbound(user_id)
+        email = None
+        if settings.inbound_email_domain:
+            if not row.get("email_token"):
+                store.set_email_token(user_id, inbound.new_email_token())
+                row = store.inbound(user_id)
+            email = f"{row['email_token']}@{settings.inbound_email_domain}"
+        return {"email": {"available": bool(settings.inbound_email_domain), "address": email},
+                "whatsapp": {"available": bool(wa_client and settings.whatsapp_number), "number": settings.whatsapp_number,
+                             "linked": bool(row.get("whatsapp_key"))}}
+
+    @app.get("/v1/inbound")
+    def get_inbound(user_id: str = Depends(current_user)) -> dict:
+        """Your private forwarding address and WhatsApp connection."""
+        return inbound_out(user_id)
+
+    @app.post("/v1/inbound/email/rotate")
+    def rotate_inbound_email(user_id: str = Depends(current_user)) -> dict:
+        """Get a new forwarding address; the old one stops working."""
+        if not settings.inbound_email_domain:
+            raise HTTPException(404, "Email forwarding isn't set up on this server")
+        store.set_email_token(user_id, inbound.new_email_token())
+        store.audit(user_id, "user", "inbound.email_rotated")
+        return inbound_out(user_id)
+
+    @app.post("/v1/inbound/whatsapp/code")
+    def whatsapp_link_code(user_id: str = Depends(current_user)) -> dict:
+        """A one-time code to send from your WhatsApp to link the number."""
+        if not (wa_client and settings.whatsapp_number):
+            raise HTTPException(404, "WhatsApp isn't set up on this server")
+        code = inbound.new_link_code()
+        expires = datetime.now(timezone.utc) + timedelta(minutes=LINK_CODE_MINUTES)
+        store.set_whatsapp_link_code(user_id, link_code_hash(code), expires.isoformat())
+        return {"code": code, "message": f"LINK {code}", "number": settings.whatsapp_number,
+                "expires_in_minutes": LINK_CODE_MINUTES}
+
+    @app.delete("/v1/inbound/whatsapp", status_code=204)
+    def unlink_whatsapp(user_id: str = Depends(current_user)) -> Response:
+        store.unlink_whatsapp(user_id)
+        store.audit(user_id, "user", "inbound.whatsapp_unlinked")
+        return Response(status_code=204)
+
+    def forwarded(user_id: str, n: int, channel: str) -> None:
+        if n:
+            notifier.notify(user_id, "documents_received",
+                            f"{n} document{'s' if n > 1 else ''} arrived by {channel} and {'are' if n > 1 else 'is'} waiting for your review.")
+
+    @app.post("/inbound/email", include_in_schema=False)
+    async def inbound_email(request: Request, secret: str = Query("")) -> dict:
+        """Webhook for an inbound-mail provider (Postmark JSON format)."""
+        if not (settings.inbound_email_domain and settings.inbound_email_secret) or \
+                not constant_time_equals(secret, settings.inbound_email_secret):
+            raise HTTPException(404, "Not found")
+        try:
+            payload = await request.json()
+        except ValueError:
+            return {"accepted": 0}
+        token = inbound.token_for_domain(inbound.email_recipients(payload), settings.inbound_email_domain)
+        user_id = store.user_for_email_token(token) if token else None
+        if user_id is None:
+            return {"accepted": 0}  # don't reveal which addresses exist; 200 stops the provider retrying
+        import base64
+        accepted = 0
+        for a in inbound.email_attachments(payload):
+            try:
+                read_and_store(user_id, base64.b64decode(a.content_b64), a.filename, source="email")
+                accepted += 1
+            except HTTPException as exc:
+                log.info("Skipped an emailed attachment: %s", exc.detail)
+        forwarded(user_id, accepted, "email")
+        return {"accepted": accepted}
+
+    @app.get("/inbound/whatsapp", include_in_schema=False)
+    def whatsapp_verify(mode: str = Query("", alias="hub.mode"), token: str = Query("", alias="hub.verify_token"),
+                        challenge: str = Query("", alias="hub.challenge")) -> Response:
+        """Meta's one-time webhook verification."""
+        if mode == "subscribe" and settings.whatsapp_verify_token and \
+                constant_time_equals(token, settings.whatsapp_verify_token):
+            return Response(challenge, media_type="text/plain")
+        raise HTTPException(403, "Verification failed")
+
+    def handle_whatsapp(msg: inbound.WhatsAppMessage) -> None:
+        key = inbound.phone_key(settings.auth_secret, msg.sender)
+        reply = lambda kind: wa_client.send_text(msg.sender, inbound.REPLY[kind])  # noqa: E731
+        try:
+            if msg.kind == "text":
+                m = re.search(r"\b(\d{6})\b", msg.text)
+                linking_user = store.user_for_link_code(link_code_hash(m.group(1))) if m else None
+                if linking_user:
+                    store.link_whatsapp(linking_user, key, msg.sender)
+                    store.audit(linking_user, "whatsapp", "inbound.whatsapp_linked")
+                    reply("linked")
+                elif store.user_for_whatsapp(key) is None:
+                    reply("unknown")
+                else:
+                    reply("unsupported")
+                return
+            user_id = store.user_for_whatsapp(key)
+            if user_id is None:
+                reply("unknown")
+                return
+            if msg.kind == "other" or not msg.media_id or (msg.mime_type and msg.mime_type not in inbound.ACCEPTED_TYPES):
+                reply("unsupported")
+                return
+            try:
+                read_and_store(user_id, wa_client.download(msg.media_id), msg.filename, source="whatsapp")
+            except HTTPException as exc:
+                reply("too_many" if exc.status_code == 429 else "unsupported")
+                return
+            forwarded(user_id, 1, "WhatsApp")
+            reply("received")
+        except Exception:
+            log.exception("WhatsApp message handling failed")
+
+    @app.post("/inbound/whatsapp", include_in_schema=False)
+    async def whatsapp_webhook(request: Request, background: BackgroundTasks,
+                               x_hub_signature_256: Optional[str] = Header(None)) -> dict:
+        """WhatsApp Business Cloud API webhook. Answers at once; documents are read in the background."""
+        if not (wa_client and settings.whatsapp_app_secret):
+            raise HTTPException(404, "Not found")
+        raw = await request.body()
+        if not inbound.verify_meta_signature(settings.whatsapp_app_secret, raw, x_hub_signature_256):
+            raise HTTPException(401, "Bad signature")
+        try:
+            messages = inbound.whatsapp_messages(json.loads(raw))
+        except ValueError:
+            return {"received": 0}
+        for msg in messages:
+            background.add_task(handle_whatsapp, msg)
+        return {"received": len(messages)}
+
+    # --- results over time -----------------------------------------------------------------
+    @app.get("/v1/trends")
+    def get_trends(member_id: Optional[str] = Query(None, description="A relative's id; omit for your own results"),
+                   user_id: str = Depends(current_user)) -> dict:
+        """Each test's results over time, with the latest value placed in its guideline range."""
+        profile = store.get_profile(user_id)
+        if member_id:
+            member = next((m for m in profile.family if m.id == member_id), None)
+            if member is None:
+                raise HTTPException(404, "No such relative")
+            observations = member.observations
+        else:
+            observations = profile.observations
+        return {"tests": trends.build(observations)}
 
     @app.get("/v1/ingests")
     def list_ingests(user_id: str = Depends(current_user)) -> list[dict]:

@@ -5,7 +5,7 @@ import { Text, View } from 'react-native';
 import { Badge, Check, Progress, Row, Section } from '../../components/list';
 import { Banner, Body, Button, Card, ErrorText, H2, Loading, Screen, styles } from '../../components/ui';
 import { shareDoctorSummary } from '../../lib/doctorSummary';
-import { REFERRAL_LABEL } from '../../lib/format';
+import { DOC_TYPE_LABEL, formatDay, REFERRAL_LABEL, VIA_LABEL } from '../../lib/format';
 import { pushSupport } from '../../lib/push';
 import { useSession } from '../../lib/session';
 import { LEVEL_LABEL, usePalette } from '../../lib/theme';
@@ -52,7 +52,9 @@ export default function HomeScreen() {
       steps.push({ title: 'Turn on family alerts', detail: 'Hear when a relative shares something that affects you.',
                    done: push.registered, href: '/settings' });
     }
-    return { report, notes: notes.filter((n) => !n.read), steps, referrals };
+    const pending = documents.filter((d) => d.status === 'review');
+    const testCount = new Set((own.observations ?? []).map((o) => o.code)).size;
+    return { report, notes: notes.filter((n) => !n.read), steps, referrals, pending, testCount };
   });
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryBusy, setSummaryBusy] = useState(false);
@@ -60,7 +62,7 @@ export default function HomeScreen() {
   const [pdfError, setPdfError] = useState<string | null>(null);
 
   if (!data) return <Screen>{error ? <ErrorText>{error}</ErrorText> : <Loading />}</Screen>;
-  const { report, notes, steps, referrals } = data;
+  const { report, notes, steps, referrals, pending, testCount } = data;
   const done = steps.filter((s) => s.done).length;
   const todo = steps.filter((s) => !s.done);
   const urgent = report.insights.filter((i) => i.level === 'high').length;
@@ -87,6 +89,24 @@ export default function HomeScreen() {
         <View style={{ alignSelf: 'flex-start' }}>
           <Button title="Dismiss" onPress={async () => { await api.markNotificationsRead(); reload(); }} />
         </View>
+      )}
+
+      {pending.length > 0 && (
+        <Section title="Waiting for your review" right={<Text style={{ color: c.muted }}>{pending.length}</Text>}>
+          {pending.map((d, i) => (
+            <Row key={d.id} title={DOC_TYPE_LABEL[d.doc_type]}
+                 detail={[formatDay(d.doc_date), d.source ? VIA_LABEL[d.source] : ''].filter(Boolean).join(' · ')}
+                 onPress={() => router.push({ pathname: '/document/[id]', params: { id: d.id } })}
+                 last={i === pending.length - 1} />
+          ))}
+        </Section>
+      )}
+
+      {testCount > 0 && (
+        <Section title="Your results">
+          <Row title="Results over time" detail={`${testCount} test${testCount > 1 ? 's' : ''}, with healthy ranges`}
+               onPress={() => router.push('/results')} last />
+        </Section>
       )}
 
       {todo.length > 0 && (
