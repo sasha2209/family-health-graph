@@ -155,10 +155,18 @@ class FamilyMember(BaseModel):
     deceased: Optional[bool] = None
     age: Optional[int] = None  # current age, or age at death
     conditions: list[Condition] = Field(default_factory=list)
+    # A managed profile: what the user records for a relative from that relative's own documents
+    # (a parent's prescription or lab report). Kept on the user's record only; never shared onward.
+    medications: list["Medication"] = Field(default_factory=list)
+    observations: list["Observation"] = Field(default_factory=list)
     source: str = "manual"
     # True when (some of) this relative's data comes live from their own linked
     # account rather than from what the user typed or imported.
     linked: bool = False
+
+    def latest(self, code: str) -> Optional["Observation"]:
+        obs = [o for o in self.observations if o.code == code]
+        return max(obs, key=lambda o: o.effective_date or date.min) if obs else None
 
     @property
     def degree(self) -> Optional[int]:

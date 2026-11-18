@@ -194,6 +194,7 @@ CREATE TABLE IF NOT EXISTS documents (
     doc_type TEXT NOT NULL,
     doc_date TEXT,
     subject TEXT NOT NULL DEFAULT 'self',
+    subject_member_id TEXT,           -- the relative's FamilyMember id when subject isn't "self"
     filename TEXT,
     media_type TEXT NOT NULL,
     size INTEGER NOT NULL,
@@ -232,6 +233,7 @@ class Store:
         self._migrate_legacy_tokens()
         self._add_column_if_missing("org_patients", "source", "TEXT")
         self._add_column_if_missing("referrals", "partner_id", "TEXT REFERENCES partners(id)")
+        self._add_column_if_missing("documents", "subject_member_id", "TEXT")
 
     def _add_column_if_missing(self, table: str, column: str, decl: str) -> None:
         cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
@@ -770,7 +772,7 @@ class Store:
         return doc_id
 
     def _doc_row(self, r: sqlite3.Row, full: bool) -> dict:
-        out = {k: r[k] for k in ("id", "status", "doc_type", "doc_date", "subject", "filename", "media_type", "size",
+        out = {k: r[k] for k in ("id", "status", "doc_type", "doc_date", "subject", "subject_member_id", "filename", "media_type", "size",
                                  "method", "ocr_confidence", "ai_model", "ai_mode", "input_tokens", "output_tokens",
                                  "created_at", "saved_at")}
         out["has_file"] = r["has_file"]
@@ -779,7 +781,7 @@ class Store:
             out["text"] = self._cipher.decrypt(r["text"])
         return out
 
-    _DOC_COLS = ("id, status, doc_type, doc_date, subject, filename, media_type, size, method, ocr_confidence, ai_model, "
+    _DOC_COLS = ("id, status, doc_type, doc_date, subject, subject_member_id, filename, media_type, size, method, ocr_confidence, ai_model, "
                  "ai_mode, input_tokens, output_tokens, created_at, saved_at, file IS NOT NULL AS has_file")
 
     def document(self, user_id: str, doc_id: str) -> Optional[dict]:
@@ -787,9 +789,13 @@ class Store:
                            (doc_id, user_id))
         return self._doc_row(rows[0], full=True) if rows else None
 
-    def documents(self, user_id: str) -> list[dict]:
-        rows = self._query(f"SELECT {self._DOC_COLS} FROM documents WHERE user_id = ? AND status != 'discarded' "
-                           "ORDER BY COALESCE(doc_date, substr(created_at, 1, 10)) DESC, created_at DESC", (user_id,))
+    def documents(self, user_id: str, member_id: Optional[str] = None) -> list[dict]:
+        where, params = "user_id = ? AND status != 'discarded'", [user_id]
+        if member_id is not None:
+            where += " AND subject_member_id = ?"
+            params.append(member_id)
+        rows = self._query(f"SELECT {self._DOC_COLS} FROM documents WHERE {where} "
+                           "ORDER BY COALESCE(doc_date, substr(created_at, 1, 10)) DESC, created_at DESC", tuple(params))
         return [self._doc_row(r, full=False) for r in rows]
 
     def document_file(self, user_id: str, doc_id: str) -> Optional[tuple[str, bytes, Optional[str]]]:
@@ -799,12 +805,13 @@ class Store:
         return rows[0]["media_type"], self._cipher.decrypt_bytes(rows[0]["file"]), rows[0]["filename"]
 
     def save_document(self, user_id: str, doc_id: str, *, doc_type: str, doc_date: Optional[str], subject: str,
-                      extraction: dict) -> None:
+                      extraction: dict, subject_member_id: Optional[str] = None) -> None:
         with self._lock, self._conn:
             self._conn.execute(
-                "UPDATE documents SET status = 'saved', doc_type = ?, doc_date = ?, subject = ?, extraction = ?, saved_at = ? "
-                "WHERE id = ? AND user_id = ?",
-                (doc_type, doc_date, subject, self._cipher.encrypt(json.dumps(extraction)), _now(), doc_id, user_id))
+                "UPDATE documents SET status = 'saved', doc_type = ?, doc_date = ?, subject = ?, subject_member_id = ?, "
+                "extraction = ?, saved_at = ? WHERE id = ? AND user_id = ?",
+                (doc_type, doc_date, subject, subject_member_id, self._cipher.encrypt(json.dumps(extraction)), _now(),
+                 doc_id, user_id))
 
     def delete_document(self, user_id: str, doc_id: str) -> bool:
         with self._lock, self._conn:

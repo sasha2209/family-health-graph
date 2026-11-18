@@ -7,7 +7,9 @@ import { chooseFile, choosePhoto, type Picked, takePhoto } from '../lib/pickDocu
 import { Body, Button, Card, ErrorText, H2, styles } from './ui';
 
 /** "Snap a prescription or lab report": the fastest way to fill a record with real data. */
-export function ScanCard({ replace = false }: { replace?: boolean }) {
+export function ScanCard({ replace = false, subject, memberId, title }: {
+  replace?: boolean; subject?: string; memberId?: string; title?: string;
+}) {
   const { api } = useSession();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -19,7 +21,8 @@ export function ScanCard({ replace = false }: { replace?: boolean }) {
       if (!file) return;
       setBusy(kind);
       const doc = await api.uploadDocument(file.base64, file.filename);
-      const href = { pathname: '/document/[id]', params: { id: doc.id } } as const;
+      const href = { pathname: '/document/[id]' as const,
+                     params: { id: doc.id, ...(subject ? { subject } : {}), ...(memberId ? { member: memberId } : {}) } };
       if (replace) router.replace(href);
       else router.push(href);
     } catch (e) {
@@ -31,7 +34,7 @@ export function ScanCard({ replace = false }: { replace?: boolean }) {
 
   return (
     <Card>
-      <H2>Add a prescription or lab report</H2>
+      <H2>{title ?? 'Add a prescription or lab report'}</H2>
       <Body muted>
         Take a photo or upload a PDF. We read it, you check what we found, and only what you keep is added.
         Works for your family’s documents too.

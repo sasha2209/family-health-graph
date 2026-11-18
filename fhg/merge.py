@@ -10,6 +10,8 @@ from .models import (
     Condition,
     FamilyMember,
     HealthProfile,
+    Medication,
+    Observation,
 )
 
 
@@ -42,7 +44,41 @@ def merge_conditions(existing: list[Condition], incoming: list[Condition]) -> in
     return added
 
 
+def merge_observations(existing: list[Observation], incoming: list[Observation]) -> int:
+    seen = {(o.code, o.value, o.effective_date) for o in existing}
+    added = 0
+    for o in incoming:
+        if (o.code, o.value, o.effective_date) not in seen:
+            existing.append(o)
+            seen.add((o.code, o.value, o.effective_date))
+            added += 1
+    return added
+
+
+def merge_medications(existing: list[Medication], incoming: list[Medication]) -> int:
+    by_name = {m.name.strip().lower(): m for m in existing}
+    added = 0
+    for m in incoming:
+        old = by_name.get(m.name.strip().lower())
+        if old is None:
+            existing.append(m)
+            by_name[m.name.strip().lower()] = m
+            added += 1
+        elif m.prescribed_on and (old.prescribed_on is None or m.prescribed_on >= old.prescribed_on):
+            # A newer prescription for the same medicine: keep the latest dosing.
+            old.dosage, old.prescribed_on = m.dosage or old.dosage, m.prescribed_on
+    return added
+
+
+def merge_member_records(member: FamilyMember, new: FamilyMember) -> int:
+    """Medicines and test results for a managed relative. Returns items added."""
+    return merge_medications(member.medications, new.medications) + merge_observations(member.observations, new.observations)
+
+
 def find_match(family: list[FamilyMember], new: FamilyMember) -> FamilyMember | None:
+    by_id = next((m for m in family if m.id == new.id), None)
+    if by_id is not None:  # explicitly targeted (e.g. "this document is my older sister's")
+        return by_id
     same_rel = [m for m in family if m.relationship == new.relationship]
     if not same_rel:
         return None
@@ -73,19 +109,8 @@ def merge_into(profile: HealthProfile, fragment: HealthProfile) -> dict:
 
     stats["conditions"] = merge_conditions(profile.conditions, fragment.conditions)
 
-    seen_obs = {(o.code, o.value, o.effective_date) for o in profile.observations}
-    for o in fragment.observations:
-        if (o.code, o.value, o.effective_date) not in seen_obs:
-            profile.observations.append(o)
-            seen_obs.add((o.code, o.value, o.effective_date))
-            stats["observations"] += 1
-
-    seen_meds = {m.name.strip().lower() for m in profile.medications}
-    for m in fragment.medications:
-        if m.name.strip().lower() not in seen_meds:
-            profile.medications.append(m)
-            seen_meds.add(m.name.strip().lower())
-            stats["medications"] += 1
+    stats["observations"] = merge_observations(profile.observations, fragment.observations)
+    stats["medications"] = merge_medications(profile.medications, fragment.medications)
 
     for new in fragment.family:
         match = find_match(profile.family, new)
@@ -99,6 +124,7 @@ def merge_into(profile: HealthProfile, fragment: HealthProfile) -> dict:
         match.deceased = match.deceased if match.deceased is not None else new.deceased
         match.age = match.age if match.age is not None else new.age
         stats["relative_conditions"] += merge_conditions(match.conditions, new.conditions)
+        merge_member_records(match, new)
 
     profile.touch()
     return stats
