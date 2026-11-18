@@ -4,7 +4,9 @@ pydantic>=2.7
 cryptography>=42
 pyjwt>=2.8
 segno>=1.6          # QR codes for clinic intake links (pure Python)          # Sign in with Apple / Google token verification
-anthropic>=0.40   # optional: AI plain-language summaries
+pypdf>=4           # read text from uploaded PDFs
+pillow>=10         # prepare photos for OCR (Tesseract itself is a system package)
+anthropic>=0.40   # optional: AI summaries and the document-reading fallback
 # dev
 pytest>=8
 httpx>=0.27

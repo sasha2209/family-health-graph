@@ -8,6 +8,9 @@ import type {
   Me,
   SignInResult,
   Consent,
+  DocumentDetail,
+  DocumentSaveBody,
+  DocumentSummary,
   CreatedInvite,
   FamilyLink,
   IngestResult,
@@ -90,6 +93,14 @@ export function createApi(token: string | null) {
     summary: () => authed<{ text: string; generated_by: string; disclaimer: string }>('/v1/insights/summary'),
     ingestText: (text: string, preview = false) =>
       authed<IngestResult>(`/v1/ingest/text${preview ? '?preview=true' : ''}`, { method: 'POST', body: { text } }),
+    uploadDocument: (dataBase64: string, filename?: string) =>
+      authed<DocumentDetail>('/v1/documents', { method: 'POST', body: { data_base64: dataBase64, filename } }),
+    documents: () => authed<DocumentSummary[]>('/v1/documents'),
+    document: (id: string) => authed<DocumentDetail>(`/v1/documents/${encodeURIComponent(id)}`),
+    saveDocument: (id: string, body: DocumentSaveBody) =>
+      authed<IngestResult & { document: DocumentDetail }>(`/v1/documents/${encodeURIComponent(id)}/save`,
+        { method: 'POST', body }),
+    deleteDocument: (id: string) => authed<void>(`/v1/documents/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     ingestFhir: (bundle: unknown) => authed<IngestResult>('/v1/ingest/fhir', { method: 'POST', body: bundle }),
     deleteRelative: (id: string) => authed<void>(`/v1/family/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 

@@ -15,6 +15,8 @@ from .insights import generate_insights
 from .models import HealthProfile
 
 CONSENT_LLM = "ai_summary"
+# Lets the AI reader look at documents the on-server OCR and rules couldn't read.
+CONSENT_AI_DOCS = "ai_document_reading"
 CONSENT_RESEARCH = "research_deidentified"
 
 

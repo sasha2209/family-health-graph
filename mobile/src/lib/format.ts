@@ -44,3 +44,18 @@ export const REFERRAL_LABEL: Record<string, string> = {
   completed: 'Completed',
   declined: 'Not pursuing',
 };
+
+export const DOC_TYPE_LABEL: Record<string, string> = {
+  prescription: 'Prescription',
+  lab_report: 'Lab report',
+  discharge_summary: 'Discharge summary',
+  other: 'Medical document',
+};
+
+/** "2026-03-14" -> "14 Mar 2026" without timezone surprises. */
+export function formatDay(iso: string | null): string {
+  if (!iso) return 'Date not found';
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${d} ${months[m - 1]} ${y}`;
+}

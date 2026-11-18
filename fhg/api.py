@@ -18,20 +18,24 @@ from pydantic import BaseModel, Field
 from . import auth, clinic, partners, push
 from .clinician_report import render_html as clinician_report_html
 from .family_links import (
+    compose,
     SHARE_LEVELS,
     cascade_categories,
     effective_profile,
     inverse_relationship,
     notify_cascade,
 )
+from . import documents as docs
 from .ingest import CsvImportError, parse_family_csv, parse_family_history_text, parse_fhir, to_fhir_bundle
 from .insights import generate_insights, summarize
 from .merge import merge_into
-from .models import Condition, FamilyMember, HealthProfile, Observation, Relationship, Sex
+from .models import Condition, FamilyMember, HealthProfile, Medication, Observation, Relationship, Sex
 from .security import constant_time_equals, load_cipher, pseudonym
-from .sharing import CONSENT_LLM, CONSENT_RESEARCH, PARTNERS, deidentify, partner_payload, share_scope
+from .sharing import CONSENT_AI_DOCS, CONSENT_LLM, CONSENT_RESEARCH, PARTNERS, deidentify, partner_payload, share_scope
 from .storage import Store
-from .terminology import OBSERVATION_ALIASES, category_from_text
+from .terminology import CONCEPTS_BY_CATEGORY as _CONCEPTS, OBSERVATION_ALIASES, OBSERVATION_TO_LOINC, category_from_text
+
+CONCEPT_CATEGORIES = set(_CONCEPTS)
 
 PKG_DIR = Path(__file__).parent
 log = logging.getLogger(__name__)
@@ -120,6 +124,45 @@ class ObservationIn(BaseModel):
     value: float
     unit: str = ""
     effective_date: Optional[date] = None
+
+
+class DocumentIn(BaseModel):
+    data_base64: str = Field(description="The file (PDF, JPEG or PNG), base64-encoded")
+    filename: Optional[str] = Field(None, max_length=200)
+
+
+class DocConditionIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    category: Optional[str] = None
+    onset_age: Optional[int] = Field(None, ge=0, le=120)
+
+
+class DocMedicationIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    dosage: Optional[str] = Field(None, max_length=200)
+
+
+class DocObservationIn(BaseModel):
+    code: str
+    value: float
+    unit: str = ""
+
+
+class DocRelativeIn(BaseModel):
+    relationship: Relationship
+    conditions: list[DocConditionIn] = Field(default_factory=list)
+
+
+class DocumentSaveIn(BaseModel):
+    """The items the user kept on the review screen."""
+    subject: str = Field("self", description='"self", or the relationship of the relative this document is about')
+    doc_type: str = "other"
+    doc_date: Optional[date] = None
+    relative_age: Optional[int] = Field(None, ge=0, le=120)
+    conditions: list[DocConditionIn] = Field(default_factory=list)
+    medications: list[DocMedicationIn] = Field(default_factory=list)
+    observations: list[DocObservationIn] = Field(default_factory=list)
+    family: list[DocRelativeIn] = Field(default_factory=list)
 
 
 class ConsentIn(BaseModel):
@@ -213,7 +256,8 @@ def create_app(settings: Optional[Settings] = None,
                push_sender: Optional[push.PushSender] = None,
                push_in_background: bool = True,
                webhook_sender: Optional[partners.WebhookSender] = None,
-               webhooks_in_background: bool = True) -> FastAPI:
+               webhooks_in_background: bool = True,
+               document_ai_client: Optional[object] = None) -> FastAPI:
     settings = settings or Settings.from_env()
     email_sender = email_sender or auth.email_sender_from_env()
     if settings.auth_secret == Settings.auth_secret:
@@ -232,7 +276,7 @@ def create_app(settings: Optional[Settings] = None,
     if settings.cors_origins:
         app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins),
                            allow_methods=["*"], allow_headers=["Authorization", "Content-Type"])
-    valid_scopes = {CONSENT_LLM, CONSENT_RESEARCH} | {share_scope(p) for p in PARTNERS}
+    valid_scopes = {CONSENT_LLM, CONSENT_AI_DOCS, CONSENT_RESEARCH} | {share_scope(p) for p in PARTNERS}
 
     def optional_session(authorization: Optional[str] = Header(None)) -> Optional[dict]:
         if not authorization or not authorization.lower().startswith("bearer "):
@@ -518,6 +562,137 @@ def create_app(settings: Optional[Settings] = None,
         except CsvImportError as exc:
             raise HTTPException(422, str(exc)) from exc
         return ingest(user_id, "csv", body.content, fragment, preview, warnings)
+
+    # --- documents (photos / PDFs of prescriptions, lab reports, discharge summaries) ---
+    MAX_DOCUMENT_BYTES = 12 * 1024 * 1024
+    DOCUMENTS_PER_HOUR = 30
+
+    def doc_out(doc: dict, read: Optional[docs.ReadResult] = None) -> dict:
+        out = {k: v for k, v in doc.items() if k != "text"}
+        out["text_preview"] = doc.get("text", "")[:4000]
+        out["ai_used"] = bool(doc.get("ai_model"))
+        if read is not None:
+            out["warnings"] = read.warnings
+            out["ai_reason"] = read.ai_reason
+        return out
+
+    @app.post("/v1/documents", status_code=201)
+    def upload_document(body: DocumentIn, user_id: str = Depends(current_user)) -> dict:
+        """Read a document and return a draft for review. Nothing is added to the record until it's saved."""
+        import base64
+        import binascii
+
+        try:
+            data = base64.b64decode(body.data_base64.split(",", 1)[-1], validate=False)
+        except (binascii.Error, ValueError) as exc:
+            raise HTTPException(422, "The file isn't valid base64.") from exc
+        if not data:
+            raise HTTPException(422, "The file is empty.")
+        if len(data) > MAX_DOCUMENT_BYTES:
+            raise HTTPException(413, "Files can be up to 12 MB. Try a smaller photo or a PDF.")
+        if store.documents_this_hour(user_id) >= DOCUMENTS_PER_HOUR:
+            raise HTTPException(429, "That's a lot of documents in one hour. Please try again a little later.")
+        allow_ai = store.has_consent(user_id, CONSENT_AI_DOCS)
+        try:
+            read = docs.read_document(data, allow_ai=allow_ai, client=document_ai_client)
+        except docs.UnsupportedDocument as exc:
+            raise HTTPException(415, str(exc)) from exc
+        e = read.extraction
+        doc_id = store.create_document(
+            user_id, doc_type=e.doc_type, doc_date=e.doc_date.isoformat() if e.doc_date else None,
+            filename=body.filename, media_type=read.media_type, file=data, text=read.text.text,
+            extraction=e.model_dump(mode="json"), method=read.text.method, ocr_confidence=read.text.confidence,
+            ai_model=read.ai.model if read.ai else None, ai_mode=read.ai.mode if read.ai else None,
+            input_tokens=read.ai.input_tokens if read.ai else 0, output_tokens=read.ai.output_tokens if read.ai else 0)
+        store.audit(user_id, "user", "document.uploaded", {
+            "document_id": doc_id, "doc_type": e.doc_type, "method": read.text.method,
+            "ai": read.ai.model if read.ai else None,
+            "tokens": (read.ai.input_tokens + read.ai.output_tokens) if read.ai else 0})
+        return doc_out(store.document(user_id, doc_id), read)
+
+    @app.get("/v1/documents")
+    def list_documents(user_id: str = Depends(current_user)) -> list[dict]:
+        return store.documents(user_id)
+
+    def own_document(user_id: str, doc_id: str) -> dict:
+        doc = store.document(user_id, doc_id)
+        if doc is None:
+            raise HTTPException(404, "No such document")
+        return doc
+
+    @app.get("/v1/documents/{doc_id}")
+    def get_document(doc_id: str, user_id: str = Depends(current_user)) -> dict:
+        return doc_out(own_document(user_id, doc_id))
+
+    @app.get("/v1/documents/{doc_id}/file")
+    def document_file(doc_id: str, user_id: str = Depends(current_user)) -> Response:
+        found = store.document_file(user_id, doc_id)
+        if found is None:
+            raise HTTPException(404, "No file stored for this document")
+        media_type, data, _ = found
+        store.audit(user_id, "user", "document.viewed", {"document_id": doc_id})
+        return Response(data, media_type=media_type, headers={
+            "Cache-Control": "no-store", "Content-Disposition": "inline", "X-Content-Type-Options": "nosniff"})
+
+    @app.post("/v1/documents/{doc_id}/save")
+    def save_document(doc_id: str, body: DocumentSaveIn, user_id: str = Depends(current_user)) -> dict:
+        """Add the reviewed items to the record: yours, or a relative's if the document is about them."""
+        doc = own_document(user_id, doc_id)
+        if doc["status"] == "saved":
+            raise HTTPException(409, "This document has already been added to your record")
+        if body.doc_type not in docs.DOC_TYPES:
+            raise HTTPException(422, f"doc_type must be one of {list(docs.DOC_TYPES)}")
+        unknown = [o.code for o in body.observations if o.code not in OBSERVATION_TO_LOINC]
+        if unknown:
+            raise HTTPException(422, f"Unknown test codes: {unknown}")
+        source = f"document:{doc_id}"
+
+        def conditions(items: list[DocConditionIn]) -> list[Condition]:
+            return [Condition(name=c.name, category=c.category if c.category in CONCEPT_CATEGORIES else category_from_text(c.name),
+                              onset_age=c.onset_age, status="active", source=source) for c in items]
+
+        warnings: list[str] = []
+        if body.subject == "self":
+            fragment = HealthProfile(
+                conditions=conditions(body.conditions),
+                medications=[Medication(name=m.name, dosage=m.dosage, prescribed_on=body.doc_date, source=source)
+                             for m in body.medications],
+                observations=[Observation(code=o.code, value=o.value, unit=o.unit, effective_date=body.doc_date, source=source)
+                              for o in body.observations],
+                family=[FamilyMember(relationship=r.relationship, conditions=conditions(r.conditions), source=source)
+                        for r in body.family if r.conditions])
+        else:
+            try:
+                subject = Relationship(body.subject)
+            except ValueError as exc:
+                raise HTTPException(422, "subject must be \"self\" or a relationship such as \"mother\"") from exc
+            members = [FamilyMember(relationship=subject, age=body.relative_age,
+                                    conditions=conditions(body.conditions), source=source)]
+            # Their family history is yours too, when the relationship can be worked out (their mother = your grandmother).
+            for r in body.family:
+                mine = compose(subject, r.relationship)
+                if mine and r.conditions:
+                    members.append(FamilyMember(relationship=mine, conditions=conditions(r.conditions), source=source))
+            fragment = HealthProfile(family=members)
+            if body.medications or body.observations:
+                warnings.append("Medicines and test results are kept only on your own record, so they were not added for your relative.")
+        result = ingest(user_id, "document", json.dumps({"document_id": doc_id, "subject": body.subject}),
+                        fragment, preview=False, warnings=warnings)
+        store.save_document(user_id, doc_id, doc_type=body.doc_type,
+                            doc_date=body.doc_date.isoformat() if body.doc_date else None, subject=body.subject,
+                            # Keep what was read (patient, facility...) with the items as the user kept them.
+                            extraction=doc["extraction"] | body.model_dump(
+                                mode="json", include={"doc_type", "doc_date", "conditions", "medications",
+                                                      "observations", "family"}))
+        return result | {"document": doc_out(store.document(user_id, doc_id))}
+
+    @app.delete("/v1/documents/{doc_id}", status_code=204)
+    def delete_document(doc_id: str, user_id: str = Depends(current_user)) -> Response:
+        """Delete the stored file and what was read from it. Items already added to your record stay there."""
+        if not store.delete_document(user_id, doc_id):
+            raise HTTPException(404, "No such document")
+        store.audit(user_id, "user", "document.deleted", {"document_id": doc_id})
+        return Response(status_code=204)
 
     @app.get("/v1/ingests")
     def list_ingests(user_id: str = Depends(current_user)) -> list[dict]:

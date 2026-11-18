@@ -294,10 +294,13 @@ def to_fhir_bundle(profile: HealthProfile, categories: Optional[set[str]] = None
 
     if "medications" in categories:
         for m in profile.medications:
-            entries.append({"resource": {
-                "resourceType": "MedicationStatement", "status": m.status, "subject": subject,
-                "medicationCodeableConcept": {"text": m.name},
-            }})
+            res = {"resourceType": "MedicationStatement", "status": m.status, "subject": subject,
+                   "medicationCodeableConcept": {"text": m.name}}
+            if m.dosage:
+                res["dosage"] = [{"text": m.dosage}]
+            if m.prescribed_on:
+                res["dateAsserted"] = m.prescribed_on.isoformat()
+            entries.append({"resource": res})
 
     if "family_history" in categories:
         for fm in profile.family:

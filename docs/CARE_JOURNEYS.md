@@ -101,12 +101,23 @@ This builds on the partner API (referrals, built) and adds a **consented family-
 
 | Phase | Build | Why first |
 |---|---|---|
-| **1** | **Document upload + AI extraction + review**, and **managed family profiles** | Covers the most journeys with no partnerships, and gives users an instant payoff |
+| **1** | ✅ **Document upload with on-server OCR, AI fallback and review** (a relative's document feeds their history); managed family profiles next | Covers the most journeys with no partnerships, and gives users an instant payoff |
 | **2** | Email / WhatsApp forwarding; lab value trends; provenance badges | Ingestion with zero effort for the user; repeat engagement |
 | **3** | ABDM PHR integration (India) and SMART on FHIR patient access (US) | Standards-based records at scale (needs sandbox access and certification) |
 | **4** | Partner family-history API (OAuth, consent artefacts, FHIR `FamilyMemberHistory` / `RiskAssessment`) | Turns the graph into a platform partners pay for |
 
-**Open decisions for you:**
-1. **Launch market first** (India: ABDM, WhatsApp, Indian lab formats; or US: SMART on FHIR, HIPAA).
-2. Whether AI document reading can be sent to an AI provider under your agreements (BAA/DPA), or whether some
-   documents must be processed with a self-hosted model.
+## 7. Decisions
+
+1. **Launch market: India first.** It's the faster market to get users onboarded and show traction:
+   - Records are mostly **paper and PDFs** (handwritten prescriptions, lab-chain PDFs over WhatsApp), so
+     "snap your report" solves a real daily problem, and nobody else holds the family's history.
+   - **One family member manages the family's health paperwork**, which is exactly the managed-profile behaviour
+     the graph needs.
+   - **Labs and telehealth companies are partners within reach** (Thyrocare, Dr Lal, Metropolis, Redcliffe,
+     Practo, Tata 1mg) and pilots with clinics move faster.
+   - **ABDM** gives free national rails (ABHA, PHR apps, consent manager) for phase 3.
+   - Revenue per user is lower than in the US, so the US remains the market for payer and health-system contracts
+     later. Everything stays FHIR-based, so nothing has to be rebuilt.
+2. **AI document reading: allowed, but token-light.** Documents are read on our own server first: the PDF text
+   layer, otherwise Tesseract OCR, then rules tuned for Indian prescriptions and lab reports. The AI reader is only
+   a fallback (see `DOCUMENT_UPLOAD.md`), it's opt-in per user, and every call's token use is recorded.

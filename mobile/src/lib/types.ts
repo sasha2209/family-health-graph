@@ -139,3 +139,60 @@ export interface DeviceSession {
   last_used_at: string;
   current: boolean;
 }
+
+// --- uploaded documents ---------------------------------------------------------------
+export type DocType = 'prescription' | 'lab_report' | 'discharge_summary' | 'other';
+
+export interface DocCondition { name: string; category: string | null; onset_age?: number | null; evidence?: string }
+export interface DocMedication { name: string; dosage: string | null; evidence?: string }
+export interface DocObservation {
+  code: string; display?: string; value: number; unit: string; flag?: string | null; evidence?: string;
+}
+export interface DocRelative { relationship: string; conditions: DocCondition[] }
+
+export interface DocExtraction {
+  doc_type: DocType;
+  doc_date: string | null;
+  facility: string | null;
+  doctor: string | null;
+  patient: { name: string | null; age: number | null; sex: string | null };
+  conditions: DocCondition[];
+  medications: DocMedication[];
+  observations: DocObservation[];
+  family: DocRelative[];
+  read_by: 'rules' | 'rules+ai';
+}
+
+export interface DocumentSummary {
+  id: string;
+  status: 'review' | 'saved';
+  doc_type: DocType;
+  doc_date: string | null;
+  subject: string;
+  filename: string | null;
+  media_type: string;
+  method: 'pdf_text' | 'ocr' | 'none';
+  ai_model: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  created_at: string;
+  has_file: boolean;
+}
+
+export interface DocumentDetail extends DocumentSummary {
+  extraction: DocExtraction;
+  text_preview: string;
+  ai_used: boolean;
+  warnings?: string[];
+}
+
+export interface DocumentSaveBody {
+  subject: string;
+  doc_type: DocType;
+  doc_date: string | null;
+  relative_age?: number | null;
+  conditions: DocCondition[];
+  medications: DocMedication[];
+  observations: DocObservation[];
+  family: DocRelative[];
+}

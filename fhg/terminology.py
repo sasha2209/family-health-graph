@@ -197,6 +197,16 @@ LOINC_TO_OBSERVATION: dict[str, str] = {
     "39156-5": "bmi",
     "8480-6": "systolic_bp",
     "8462-4": "diastolic_bp",
+    "2571-8": "triglycerides",
+    "1558-6": "fasting_glucose",
+    "1521-0": "postprandial_glucose",
+    "3016-3": "tsh",
+    "718-7": "hemoglobin",
+    "2160-0": "creatinine",
+    "33914-3": "egfr",
+    "62238-1": "egfr",
+    "1989-3": "vitamin_d",
+    "2132-9": "vitamin_b12",
 }
 BP_PANEL_CODES = {"85354-9", "55284-4"}
 
@@ -209,6 +219,15 @@ OBSERVATION_TO_LOINC: dict[str, tuple[str, str]] = {
     "bmi": ("39156-5", "Body mass index"),
     "systolic_bp": ("8480-6", "Systolic blood pressure"),
     "diastolic_bp": ("8462-4", "Diastolic blood pressure"),
+    "triglycerides": ("2571-8", "Triglycerides"),
+    "fasting_glucose": ("1558-6", "Fasting glucose"),
+    "postprandial_glucose": ("1521-0", "Glucose 2 hours after a meal"),
+    "tsh": ("3016-3", "Thyroid stimulating hormone (TSH)"),
+    "hemoglobin": ("718-7", "Hemoglobin"),
+    "creatinine": ("2160-0", "Creatinine"),
+    "egfr": ("33914-3", "Estimated GFR"),
+    "vitamin_d": ("1989-3", "Vitamin D (25-hydroxy)"),
+    "vitamin_b12": ("2132-9", "Vitamin B12"),
 }
 
 OBSERVATION_ALIASES: dict[str, str] = {
