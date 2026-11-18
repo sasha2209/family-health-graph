@@ -123,6 +123,8 @@ Design principles:
 | `GET /v1/auth/me` · `GET /v1/auth/sessions` · `DELETE /v1/auth/sessions/{id}` · `POST /v1/auth/logout` | Account, signed-in devices, sign a device out |
 | `GET /v1/profile` · `PUT /v1/profile/demographics` | Read profile / set sex & birth date |
 | `POST /v1/ingest/fhir` · `/text` · `/csv` (`?preview=true`) | Import data |
+| `GET /v1/inbound` · `POST /v1/inbound/email/rotate` · `POST /v1/inbound/whatsapp/code` | Forward documents by email or WhatsApp; they wait for review |
+| `GET /v1/trends[?member_id=]` | Each test over time, placed in guideline ranges (BMI uses Asian cut-offs) |
 | `POST /v1/documents` · `POST /v1/documents/{id}/save` · `GET /v1/documents[/{id}[/file]]` · `DELETE /v1/documents/{id}` | Upload a photo/PDF, review what was read, save it to your record or a relative's |
 | `POST /v1/family` · `DELETE /v1/family/{id}` · `POST /v1/observations` | Manual entry |
 | `GET /v1/insights` · `GET /v1/insights/summary` | Insight report / plain-language summary |
@@ -159,6 +161,8 @@ Design principles:
 | `FHG_ADMIN_KEY` | unset (research export disabled) | |
 | `FHG_PSEUDONYM_SECRET` | dev value | HMAC key for research IDs |
 | `ANTHROPIC_API_KEY`, `FHG_LLM_MODEL` | unset, `claude-opus-5-5` | Optional AI summaries |
+| `FHG_INBOUND_EMAIL_DOMAIN`, `FHG_INBOUND_EMAIL_SECRET` | unset (off) | Forward-by-email addresses and the inbound webhook secret, see [docs/FORWARDING.md](docs/FORWARDING.md) |
+| `FHG_WHATSAPP_NUMBER`, `FHG_WHATSAPP_VERIFY_TOKEN`, `FHG_WHATSAPP_APP_SECRET`, `FHG_WHATSAPP_ACCESS_TOKEN`, `FHG_WHATSAPP_PHONE_NUMBER_ID` | unset (off) | Forward by WhatsApp (Business Cloud API) |
 | `FHG_DOC_MODEL` | `claude-opus-5-5` | Model for the document-reading fallback (only used for documents OCR and rules can't read, and only with the user's consent) |
 | `FHG_AUTH_SECRET` | dev value | Keys email lookups and sign-in codes; **set a long random value in production** |
 | `FHG_EMAIL_BACKEND` | `console` | `console` prints sign-in emails to the server log; `smtp` sends them using `FHG_SMTP_HOST`, `FHG_SMTP_PORT`, `FHG_SMTP_USERNAME`, `FHG_SMTP_PASSWORD`, `FHG_EMAIL_FROM` |

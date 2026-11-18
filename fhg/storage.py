@@ -211,6 +211,17 @@ CREATE TABLE IF NOT EXISTS documents (
     saved_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id, created_at);
+-- Forwarding channels: a private email address, and a linked WhatsApp number (stored as an HMAC for lookup
+-- and encrypted for replies).
+CREATE TABLE IF NOT EXISTS inbound_channels (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    email_token TEXT UNIQUE,
+    whatsapp_key TEXT UNIQUE,
+    whatsapp_phone BLOB,
+    link_code_hash TEXT,
+    link_code_expires TEXT,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -234,6 +245,7 @@ class Store:
         self._add_column_if_missing("org_patients", "source", "TEXT")
         self._add_column_if_missing("referrals", "partner_id", "TEXT REFERENCES partners(id)")
         self._add_column_if_missing("documents", "subject_member_id", "TEXT")
+        self._add_column_if_missing("documents", "source", "TEXT NOT NULL DEFAULT 'upload'")
 
     def _add_column_if_missing(self, table: str, column: str, decl: str) -> None:
         cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
@@ -758,21 +770,21 @@ class Store:
     def create_document(self, user_id: str, *, doc_type: str, doc_date: Optional[str], filename: Optional[str],
                         media_type: str, file: bytes, text: str, extraction: dict, method: str,
                         ocr_confidence: Optional[float], ai_model: Optional[str], ai_mode: Optional[str],
-                        input_tokens: int, output_tokens: int, keep_file: bool = True) -> str:
+                        input_tokens: int, output_tokens: int, keep_file: bool = True, source: str = "upload") -> str:
         doc_id = uuid.uuid4().hex[:16]
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO documents (id, user_id, status, doc_type, doc_date, filename, media_type, size, file, text, "
-                "extraction, method, ocr_confidence, ai_model, ai_mode, input_tokens, output_tokens, created_at) "
-                "VALUES (?, ?, 'review', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "extraction, method, ocr_confidence, ai_model, ai_mode, input_tokens, output_tokens, created_at, source) "
+                "VALUES (?, ?, 'review', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (doc_id, user_id, doc_type, doc_date, filename, media_type, len(file),
                  self._cipher.encrypt_bytes(file) if keep_file else None, self._cipher.encrypt(text),
                  self._cipher.encrypt(json.dumps(extraction)), method, ocr_confidence, ai_model, ai_mode,
-                 input_tokens, output_tokens, _now()))
+                 input_tokens, output_tokens, _now(), source))
         return doc_id
 
     def _doc_row(self, r: sqlite3.Row, full: bool) -> dict:
-        out = {k: r[k] for k in ("id", "status", "doc_type", "doc_date", "subject", "subject_member_id", "filename", "media_type", "size",
+        out = {k: r[k] for k in ("id", "status", "source", "doc_type", "doc_date", "subject", "subject_member_id", "filename", "media_type", "size",
                                  "method", "ocr_confidence", "ai_model", "ai_mode", "input_tokens", "output_tokens",
                                  "created_at", "saved_at")}
         out["has_file"] = r["has_file"]
@@ -781,7 +793,7 @@ class Store:
             out["text"] = self._cipher.decrypt(r["text"])
         return out
 
-    _DOC_COLS = ("id, status, doc_type, doc_date, subject, subject_member_id, filename, media_type, size, method, ocr_confidence, ai_model, "
+    _DOC_COLS = ("id, status, source, doc_type, doc_date, subject, subject_member_id, filename, media_type, size, method, ocr_confidence, ai_model, "
                  "ai_mode, input_tokens, output_tokens, created_at, saved_at, file IS NOT NULL AS has_file")
 
     def document(self, user_id: str, doc_id: str) -> Optional[dict]:
@@ -822,6 +834,55 @@ class Store:
         since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
         return self._query("SELECT COUNT(*) AS n FROM documents WHERE user_id = ? AND created_at > ?",
                            (user_id, since))[0]["n"]
+
+    # --- forwarding channels ---------------------------------------------------
+    def inbound(self, user_id: str) -> dict:
+        rows = self._query("SELECT * FROM inbound_channels WHERE user_id = ?", (user_id,))
+        return dict(rows[0]) if rows else {}
+
+    def _upsert_inbound(self, user_id: str, **fields) -> None:
+        cols = ", ".join(fields)
+        marks = ", ".join("?" for _ in fields)
+        updates = ", ".join(f"{k} = excluded.{k}" for k in fields)
+        with self._lock, self._conn:
+            self._conn.execute(
+                f"INSERT INTO inbound_channels (user_id, {cols}, updated_at) VALUES (?, {marks}, ?) "
+                f"ON CONFLICT(user_id) DO UPDATE SET {updates}, updated_at = excluded.updated_at",
+                (user_id, *fields.values(), _now()))
+
+    def set_email_token(self, user_id: str, token: str) -> None:
+        self._upsert_inbound(user_id, email_token=token)
+
+    def user_for_email_token(self, token: str) -> Optional[str]:
+        rows = self._query("SELECT user_id FROM inbound_channels WHERE email_token = ?", (token,))
+        return rows[0]["user_id"] if rows else None
+
+    def set_whatsapp_link_code(self, user_id: str, code_hash: str, expires: str) -> None:
+        self._upsert_inbound(user_id, link_code_hash=code_hash, link_code_expires=expires)
+
+    def user_for_link_code(self, code_hash: str) -> Optional[str]:
+        rows = self._query("SELECT user_id FROM inbound_channels WHERE link_code_hash = ? AND link_code_expires > ?",
+                           (code_hash, _now()))
+        return rows[0]["user_id"] if rows else None
+
+    def link_whatsapp(self, user_id: str, key: str, phone: str) -> None:
+        with self._lock, self._conn:
+            # A number belongs to one account: linking it here unlinks it anywhere else.
+            self._conn.execute("UPDATE inbound_channels SET whatsapp_key = NULL, whatsapp_phone = NULL "
+                               "WHERE whatsapp_key = ? AND user_id != ?", (key, user_id))
+        self._upsert_inbound(user_id, whatsapp_key=key, whatsapp_phone=self._cipher.encrypt(phone),
+                             link_code_hash=None, link_code_expires=None)
+
+    def unlink_whatsapp(self, user_id: str) -> None:
+        self._upsert_inbound(user_id, whatsapp_key=None, whatsapp_phone=None)
+
+    def user_for_whatsapp(self, key: str) -> Optional[str]:
+        rows = self._query("SELECT user_id FROM inbound_channels WHERE whatsapp_key = ?", (key,))
+        return rows[0]["user_id"] if rows else None
+
+    def whatsapp_phone(self, user_id: str) -> Optional[str]:
+        row = self.inbound(user_id)
+        return self._cipher.decrypt(row["whatsapp_phone"]) if row.get("whatsapp_phone") else None
 
     # --- deletion ----------------------------------------------------------
     def delete_user(self, user_id: str) -> None:

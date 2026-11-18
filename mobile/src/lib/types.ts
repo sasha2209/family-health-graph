@@ -33,6 +33,7 @@ export interface Condition {
   category: string | null;
   onset_age: number | null;
   age_estimated: boolean;
+  source?: string;
 }
 
 export interface FamilyMember {
@@ -48,7 +49,7 @@ export interface FamilyMember {
   linked: boolean;
 }
 
-export interface Medication { id: string; name: string; dosage: string | null; prescribed_on: string | null }
+export interface Medication { id: string; name: string; dosage: string | null; prescribed_on: string | null; source?: string }
 export interface Observation { id: string; code: string; value: number; unit: string; effective_date: string | null }
 
 export interface FamilyMemberDetail extends FamilyMember {
@@ -62,6 +63,7 @@ export interface Profile {
   sex: Sex | null;
   birth_date: string | null;
   conditions: Condition[];
+  observations?: Observation[];
   family: FamilyMember[];
 }
 
@@ -177,6 +179,7 @@ export interface DocExtraction {
 export interface DocumentSummary {
   id: string;
   status: 'review' | 'saved';
+  source?: 'upload' | 'email' | 'whatsapp';
   doc_type: DocType;
   doc_date: string | null;
   subject: string;
@@ -208,4 +211,26 @@ export interface DocumentSaveBody {
   medications: DocMedication[];
   observations: DocObservation[];
   family: DocRelative[];
+}
+
+// --- forwarding & trends ----------------------------------------------------------------
+export interface InboundInfo {
+  email: { available: boolean; address: string | null };
+  whatsapp: { available: boolean; number: string | null; linked: boolean };
+}
+
+export type Tone = 'good' | 'watch' | 'high';
+export interface TrendPoint {
+  date: string | null; value: number; unit: string; source: 'document' | 'record' | 'typed'; document_id: string | null;
+}
+export interface TrendTest {
+  code: string;
+  display: string;
+  unit: string;
+  points: TrendPoint[];
+  latest: TrendPoint;
+  change: number | null;
+  latest_band: { label: string; tone: Tone } | null;
+  bands: { from: number | null; to: number | null; label: string; tone: Tone }[];
+  bands_source: string | null;
 }

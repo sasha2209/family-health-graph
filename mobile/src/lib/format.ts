@@ -59,3 +59,21 @@ export function formatDay(iso: string | null): string {
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   return `${d} ${months[m - 1]} ${y}`;
 }
+
+/** Where a fact in the record came from, in words people recognise. */
+export function sourceLabel(source: string | undefined | null): string | null {
+  if (!source) return null;
+  if (source.startsWith('document:')) return 'From a document';
+  if (source.startsWith('linked:')) return 'Shared by them';
+  if (source.startsWith('fhir') || source === 'csv') return 'Imported record';
+  return 'Added by you';
+}
+
+export const VIA_LABEL: Record<string, string> = { email: 'via email', whatsapp: 'via WhatsApp', upload: '' };
+
+/** "2026-01-15" -> "Jan 2026" */
+export function monthYear(iso: string | null): string {
+  if (!iso) return 'undated';
+  const [y, m] = iso.split('-').map(Number);
+  return `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1]} ${y}`;
+}

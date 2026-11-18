@@ -15,6 +15,7 @@ from typing import Callable, Optional
 
 from ..models import Condition, FamilyMember, HealthProfile, Insight, Level, Reference
 from ..terminology import ldl_mg_dl
+from ..trends import rising_hba1c
 
 Rule = Callable[[HealthProfile], Optional[Insight]]
 
@@ -336,6 +337,14 @@ def diabetes_risk(p: HealthProfile) -> Optional[Insight]:
         elif a1c.value >= 5.7:
             level = Level.MODERATE
             findings.append("your most recent HbA1c is in the prediabetes range (5.7–6.4%)")
+
+    rise = rising_hba1c(p.observations)
+    if rise:
+        first, last = rise
+        evidence.append(f"Your HbA1c rose from {first.value:g}% ({first.effective_date:%b %Y}) "
+                        f"to {last.value:g}% ({last.effective_date:%b %Y})")
+        level = level or Level.MODERATE
+        findings.append("your HbA1c has been rising across your recent tests")
 
     if fdr:
         if bmi:
