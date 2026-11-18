@@ -43,7 +43,18 @@ export interface FamilyMember {
   deceased: boolean | null;
   age: number | null;
   conditions: Condition[];
+  medications?: Medication[];
+  observations?: Observation[];
   linked: boolean;
+}
+
+export interface Medication { id: string; name: string; dosage: string | null; prescribed_on: string | null }
+export interface Observation { id: string; code: string; value: number; unit: string; effective_date: string | null }
+
+export interface FamilyMemberDetail extends FamilyMember {
+  degree: number | null;
+  side: string | null;
+  documents: DocumentSummary[];
 }
 
 export interface Profile {
@@ -169,6 +180,7 @@ export interface DocumentSummary {
   doc_type: DocType;
   doc_date: string | null;
   subject: string;
+  subject_member_id: string | null;
   filename: string | null;
   media_type: string;
   method: 'pdf_text' | 'ocr' | 'none';
@@ -191,6 +203,7 @@ export interface DocumentSaveBody {
   doc_type: DocType;
   doc_date: string | null;
   relative_age?: number | null;
+  member_id?: string | null;
   conditions: DocCondition[];
   medications: DocMedication[];
   observations: DocObservation[];

@@ -21,21 +21,26 @@ function confirm(title: string, message: string, onOk: () => void) {
 const SIDES = ['Immediate', 'Maternal', 'Paternal', 'Extended'] as const;
 
 function conditionSummary(m: FamilyMember): string {
-  if (!m.conditions.length) return 'No known conditions';
-  return m.conditions.map((cond) =>
-    cond.name + (cond.onset_age != null ? ` (${cond.age_estimated ? '~' : ''}${cond.onset_age})` : '')).join(', ');
+  const parts = m.conditions.map((cond) =>
+    cond.name + (cond.onset_age != null ? ` (${cond.age_estimated ? '~' : ''}${cond.onset_age})` : ''));
+  const meds = m.medications?.length ?? 0;
+  const results = new Set((m.observations ?? []).map((o) => o.code)).size;
+  const extra = [meds ? `${meds} medicine${meds > 1 ? 's' : ''}` : '', results ? `${results} test result${results > 1 ? 's' : ''}` : '']
+    .filter(Boolean).join(', ');
+  return [parts.join(', ') || 'No known conditions', extra].filter(Boolean).join(' · ');
 }
 
 export default function FamilyScreen() {
   const c = usePalette();
   const { api } = useSession();
   const { data, error, refreshing, reload } = useLoader(async () => {
-    const [profile, links] = await Promise.all([api.profile(true), api.links()]);
-    return { profile, links };
+    const [profile, own, links] = await Promise.all([api.profile(true), api.profile(false), api.links()]);
+    // Relatives on your own record open their profile; ones only shared by a linked relative don't have one.
+    return { profile, links, ownIds: new Set(own.family.map((m) => m.id)) };
   });
 
   if (!data) return <Screen>{error ? <ErrorText>{error}</ErrorText> : <Loading />}</Screen>;
-  const { profile, links } = data;
+  const { profile, links, ownIds } = data;
 
   return (
     <Screen refreshing={refreshing} onRefresh={reload}>
@@ -59,6 +64,7 @@ export default function FamilyScreen() {
                   title={`${capitalize(label(m.relationship))}${m.name ? ` · ${m.name}` : ''}${m.deceased ? ' †' : ''}`}
                   detail={conditionSummary(m)}
                   badge={m.linked ? <Badge label="Linked" fg={c.accent} bg={c.bg} /> : undefined}
+                  onPress={ownIds.has(m.id) ? () => router.push({ pathname: '/person/[id]', params: { id: m.id } }) : undefined}
                   last={i === members.length - 1}
                 />
               ))}

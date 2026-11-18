@@ -241,11 +241,13 @@ def test_relatives_document_feeds_family_history(api):
     r = api.post(f"/v1/documents/{doc['id']}/save", headers=h, json={
         "subject": "mother", "doc_type": e["doc_type"], "relative_age": 62, "conditions": e["conditions"],
         "family": e["family"], "medications": [{"name": "Tab. Letrozole 2.5 mg"}]}).json()
-    assert r["warnings"] and r["document"]["subject"] == "mother"
+    assert r["document"]["subject"] == "mother" and r["document"]["subject_member_id"]
     fam = {m["relationship"]: m for m in api.get("/v1/profile", headers=h).json()["family"]}
     assert {c["category"] for c in fam["mother"]["conditions"]} == {"breast_cancer", "type_2_diabetes"}
     assert fam["mother"]["age"] == 62
     assert fam["maternal_grandmother"]["conditions"][0]["category"] == "ovarian_cancer"
+    # A managed profile: the mother's medicine is on her record, not the user's.
+    assert [m["name"] for m in fam["mother"]["medications"]] == ["Tab. Letrozole 2.5 mg"]
     assert api.get("/v1/profile", headers=h).json()["medications"] == []
     # The family history now drives insights.
     rules = {i["rule_id"] for i in api.get("/v1/insights", headers=h).json()["insights"]}

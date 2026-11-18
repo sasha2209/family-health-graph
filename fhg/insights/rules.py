@@ -277,9 +277,15 @@ def familial_hypercholesterolemia(p: HealthProfile) -> Optional[Insight]:
         evidence.append(f"Your most recent LDL cholesterol: {ldl.value:g} {ldl.unit}".rstrip())
     fh_family = p.affected({"familial_hypercholesterolemia"}, max_degree=2)
     evidence.extend(describe(m, c) for m, c in fh_family)
+    # A first-degree relative's very high LDL (from their own lab report, on a managed profile) is one of
+    # the family criteria clinicians use to look for FH.
+    relative_ldl = [(m, o) for m in p.family if m.degree == 1
+                    for o in [m.latest("ldl_cholesterol")] if o and ldl_mg_dl(o.value, o.unit) >= 190]
+    evidence.extend(f"{m.label}: LDL cholesterol {o.value:g} {o.unit}".rstrip() + " (from their lab report)"
+                    for m, o in relative_ldl)
     own_fh = p.own_conditions({"familial_hypercholesterolemia"})
 
-    if not (high_ldl or fh_family) or own_fh:
+    if not (high_ldl or fh_family or relative_ldl) or own_fh:
         return None
 
     return Insight(
@@ -292,6 +298,7 @@ def familial_hypercholesterolemia(p: HealthProfile) -> Optional[Insight]:
             + " and ".join(s for s, on in (
                 ("an LDL of 190 mg/dL or higher", high_ldl),
                 ("a relative diagnosed with familial hypercholesterolemia", bool(fh_family)),
+                ("a parent, sibling or child with an LDL of 190 mg/dL or higher", bool(relative_ldl)),
             ) if on)
             + ". Guidelines use this as a signal to look for familial hypercholesterolemia, a "
               "common inherited condition that is very treatable when found early."

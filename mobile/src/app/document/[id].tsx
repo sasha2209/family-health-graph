@@ -37,14 +37,14 @@ function HowRead({ doc }: { doc: DocumentDetail }) {
 }
 
 export default function DocumentReview() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, subject: presetSubject, member } = useLocalSearchParams<{ id: string; subject?: string; member?: string }>();
   const { api } = useSession();
   const c = usePalette();
   const { data: doc, error, reload } = useLoader(() => api.document(id));
 
   const [picked, setPicked] = useState<Set<string> | null>(null);
-  const [subject, setSubject] = useState('self');
-  const [moreSubjects, setMoreSubjects] = useState(false);
+  const [subject, setSubject] = useState(presetSubject ?? 'self');
+  const [moreSubjects, setMoreSubjects] = useState(!!presetSubject && !QUICK_SUBJECTS.includes(presetSubject as never));
   const [docType, setDocType] = useState<DocType | null>(null);
   const [date, setDate] = useState<string | null>(null);
   const [age, setAge] = useState<string | null>(null);
@@ -66,7 +66,7 @@ export default function DocumentReview() {
     setPicked(next);
   };
   const tick = (k: string) => <Check done={keys.has(k)} />;
-  const count = [...keys].filter((k) => self || k[0] === 'c' || k[0] === 'f').length;
+  const count = keys.size;
   const nothing = e.conditions.length + e.medications.length + e.observations.length + e.family.length === 0;
 
   async function save() {
@@ -76,9 +76,10 @@ export default function DocumentReview() {
       const r = await api.saveDocument(id, {
         subject, doc_type: type, doc_date: dateValue || null,
         relative_age: !self && ageValue ? Number(ageValue) : null,
+        member_id: !self && member && subject === presetSubject ? member : null,
         conditions: e.conditions.filter((_, i) => keys.has(`c${i}`)),
-        medications: self ? e.medications.filter((_, i) => keys.has(`m${i}`)) : [],
-        observations: self ? e.observations.filter((_, i) => keys.has(`o${i}`)) : [],
+        medications: e.medications.filter((_, i) => keys.has(`m${i}`)),
+        observations: e.observations.filter((_, i) => keys.has(`o${i}`)),
         family: e.family.map((rel, i) => ({ ...rel, conditions: rel.conditions.filter((_, j) => keys.has(`f${i}.${j}`)) }))
           .filter((rel) => rel.conditions.length),
       });
@@ -120,7 +121,8 @@ export default function DocumentReview() {
         <Banner>Added to {doc.subject === 'self' ? 'your' : `your ${label(doc.subject)}’s`} record.</Banner>
         {result?.map((w) => <Body muted key={w}>{w}</Body>)}
         <View style={styles.row}>
-          <Button title="Done" variant="primary" onPress={() => router.replace('/')} />
+          <Button title="Done" variant="primary"
+                  onPress={() => (presetSubject && router.canGoBack() ? router.back() : router.replace('/'))} />
           <Button title="Add another" onPress={() => (router.canGoBack() ? router.back() : router.replace('/add-history'))} />
         </View>
       </Screen>
@@ -170,9 +172,8 @@ export default function DocumentReview() {
       )}
 
       {e.observations.length > 0 && (
-        <Section title="Test results">
-          {!self && <View style={{ padding: 16 }}><Body muted>Test results are only kept on your own record.</Body></View>}
-          {self && e.observations.map((o, i) => (
+        <Section title={self ? 'Test results' : `${capitalize(label(subject))}’s test results`}>
+          {e.observations.map((o, i) => (
             <Row key={`o${i}`} title={`${o.display || label(o.code)}: ${o.value} ${o.unit}`.trim()}
                  detail={`${formatDay(dateValue || null)}${flagText(o.flag)}`} leading={tick(`o${i}`)}
                  onPress={() => toggle(`o${i}`)} last={i === e.observations.length - 1} />
@@ -181,9 +182,8 @@ export default function DocumentReview() {
       )}
 
       {e.medications.length > 0 && (
-        <Section title="Medicines">
-          {!self && <View style={{ padding: 16 }}><Body muted>Medicines are only kept on your own record.</Body></View>}
-          {self && e.medications.map((m, i) => (
+        <Section title={self ? 'Medicines' : `${capitalize(label(subject))}’s medicines`}>
+          {e.medications.map((m, i) => (
             <Row key={`m${i}`} title={m.name} detail={m.dosage ?? undefined} leading={tick(`m${i}`)}
                  onPress={() => toggle(`m${i}`)} last={i === e.medications.length - 1} />
           ))}

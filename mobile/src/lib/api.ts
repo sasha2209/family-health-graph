@@ -13,6 +13,7 @@ import type {
   DocumentSummary,
   CreatedInvite,
   FamilyLink,
+  FamilyMemberDetail,
   IngestResult,
   InsightReport,
   InvitePreview,
@@ -102,6 +103,11 @@ export function createApi(token: string | null) {
         { method: 'POST', body }),
     deleteDocument: (id: string) => authed<void>(`/v1/documents/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     ingestFhir: (bundle: unknown) => authed<IngestResult>('/v1/ingest/fhir', { method: 'POST', body: bundle }),
+    familyMember: (id: string) => authed<FamilyMemberDetail>(`/v1/family/${encodeURIComponent(id)}`),
+    updateFamilyMember: (id: string, body: { name?: string | null; age?: number | null; deceased?: boolean | null }) =>
+      authed<FamilyMemberDetail>(`/v1/family/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
+    deleteFamilyItem: (id: string, itemId: string) =>
+      authed<void>(`/v1/family/${encodeURIComponent(id)}/items/${encodeURIComponent(itemId)}`, { method: 'DELETE' }),
     deleteRelative: (id: string) => authed<void>(`/v1/family/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
     createInvite: (body: { relationship: string; inviter_name?: string; message?: string; share_level: ShareLevel }) =>

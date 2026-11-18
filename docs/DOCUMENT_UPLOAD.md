@@ -44,8 +44,21 @@ something; the AI only fills gaps.
 The original file, the OCR text and the extraction are encrypted at rest, like the rest of the record, and are
 deleted with the account. Saved items carry `source: "document:<id>"` for provenance.
 
+## Managed family profiles
+
+The person who manages the family's paperwork can keep a record for each relative:
+- A document filed under a relative adds their **diagnoses, medicines and test results** to that relative
+  (`subject` + optional `member_id` to pick between, say, two sisters). Later documents merge into the same
+  record; a newer prescription for the same medicine updates the dosing.
+- `GET /v1/family/{id}` returns the relative's record plus the documents filed under them; `PATCH` edits name,
+  sex, age and deceased; `DELETE /v1/family/{id}/items/{item_id}` removes a diagnosis, medicine or result.
+- **Insights use it:** a parent's, sibling's or child's LDL of 190 mg/dL or more (from their own report) flags
+  possible familial hypercholesterolemia for you.
+- **Privacy:** a relative's medicines and results stay on your record only. Linked relatives who see your family
+  tree get diagnoses only, as before; partners and research exports never get them.
+
 ## Next
 
 - WhatsApp / email forwarding into the same pipeline (phase 2).
 - Lab trends over time from repeated reports; Hindi OCR (`tesseract-ocr-hin`) for bilingual reports.
-- Managed family profiles: a full profile per relative (medicines and labs too), shareable when they join.
+- Hand a managed profile over to the relative when they join (today their own account starts fresh and links).

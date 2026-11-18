@@ -28,7 +28,7 @@ from .family_links import (
 from . import documents as docs
 from .ingest import CsvImportError, parse_family_csv, parse_family_history_text, parse_fhir, to_fhir_bundle
 from .insights import generate_insights, summarize
-from .merge import merge_into
+from .merge import find_match, merge_into
 from .models import Condition, FamilyMember, HealthProfile, Medication, Observation, Relationship, Sex
 from .security import constant_time_equals, load_cipher, pseudonym
 from .sharing import CONSENT_AI_DOCS, CONSENT_LLM, CONSENT_RESEARCH, PARTNERS, deidentify, partner_payload, share_scope
@@ -119,6 +119,13 @@ class FamilyMemberIn(BaseModel):
     conditions: list[ConditionIn] = Field(default_factory=list)
 
 
+class FamilyMemberPatch(BaseModel):
+    name: Optional[str] = Field(None, max_length=80)
+    sex: Optional[Sex] = None
+    age: Optional[int] = Field(None, ge=0, le=120)
+    deceased: Optional[bool] = None
+
+
 class ObservationIn(BaseModel):
     code: str
     value: float
@@ -159,6 +166,7 @@ class DocumentSaveIn(BaseModel):
     doc_type: str = "other"
     doc_date: Optional[date] = None
     relative_age: Optional[int] = Field(None, ge=0, le=120)
+    member_id: Optional[str] = Field(None, description="Which relative, when there are several (e.g. two sisters)")
     conditions: list[DocConditionIn] = Field(default_factory=list)
     medications: list[DocMedicationIn] = Field(default_factory=list)
     observations: list[DocObservationIn] = Field(default_factory=list)
@@ -512,6 +520,51 @@ def create_app(settings: Optional[Settings] = None,
         return ingest(user_id, "manual", body.model_dump_json(),
                       HealthProfile(family=[member]), preview=False)
 
+    def member_out(m: FamilyMember) -> dict:
+        return m.model_dump(mode="json") | {"degree": m.degree, "side": m.side}
+
+    @app.get("/v1/family/{member_id}")
+    def get_family_member(member_id: str, user_id: str = Depends(current_user)) -> dict:
+        """A relative's managed profile: diagnoses, medicines, test results, and the documents filed under them."""
+        member = next((m for m in store.get_profile(user_id).family if m.id == member_id), None)
+        if member is None:
+            raise HTTPException(404, "No such relative")
+        return member_out(member) | {"documents": store.documents(user_id, member_id=member_id)}
+
+    @app.patch("/v1/family/{member_id}")
+    def update_family_member(member_id: str, body: FamilyMemberPatch, user_id: str = Depends(current_user)) -> dict:
+        changes = body.model_dump(exclude_unset=True)
+        with store.write_lock:
+            profile = store.get_profile(user_id)
+            member = next((m for m in profile.family if m.id == member_id), None)
+            if member is None:
+                raise HTTPException(404, "No such relative")
+            for key, value in changes.items():
+                setattr(member, key, value)
+            profile.touch()
+            store.save_profile(profile)
+        store.audit(user_id, "user", "family.update", {"member_id": member_id, "fields": sorted(changes)})
+        return member_out(member)
+
+    @app.delete("/v1/family/{member_id}/items/{item_id}", status_code=204)
+    def delete_family_item(member_id: str, item_id: str, user_id: str = Depends(current_user)) -> Response:
+        """Remove one diagnosis, medicine or test result from a relative's record."""
+        with store.write_lock:
+            profile = store.get_profile(user_id)
+            member = next((m for m in profile.family if m.id == member_id), None)
+            if member is None:
+                raise HTTPException(404, "No such relative")
+            before = len(member.conditions) + len(member.medications) + len(member.observations)
+            member.conditions = [x for x in member.conditions if x.id != item_id]
+            member.medications = [x for x in member.medications if x.id != item_id]
+            member.observations = [x for x in member.observations if x.id != item_id]
+            if len(member.conditions) + len(member.medications) + len(member.observations) == before:
+                raise HTTPException(404, "No such item")
+            profile.touch()
+            store.save_profile(profile)
+        store.audit(user_id, "user", "family.item_delete", {"member_id": member_id, "item_id": item_id})
+        return Response(status_code=204)
+
     @app.delete("/v1/family/{member_id}", status_code=204)
     def delete_family_member(member_id: str, user_id: str = Depends(current_user)) -> None:
         with store.write_lock:
@@ -652,6 +705,7 @@ def create_app(settings: Optional[Settings] = None,
                               onset_age=c.onset_age, status="active", source=source) for c in items]
 
         warnings: list[str] = []
+        subject_member_id: Optional[str] = None
         if body.subject == "self":
             fragment = HealthProfile(
                 conditions=conditions(body.conditions),
@@ -666,20 +720,33 @@ def create_app(settings: Optional[Settings] = None,
                 subject = Relationship(body.subject)
             except ValueError as exc:
                 raise HTTPException(422, "subject must be \"self\" or a relationship such as \"mother\"") from exc
-            members = [FamilyMember(relationship=subject, age=body.relative_age,
-                                    conditions=conditions(body.conditions), source=source)]
+            target = FamilyMember(
+                relationship=subject, age=body.relative_age, conditions=conditions(body.conditions), source=source,
+                medications=[Medication(name=m.name, dosage=m.dosage, prescribed_on=body.doc_date, source=source)
+                             for m in body.medications],
+                observations=[Observation(code=o.code, value=o.value, unit=o.unit, effective_date=body.doc_date,
+                                          source=source) for o in body.observations])
+            existing = store.get_profile(user_id).family
+            if body.member_id:
+                chosen = next((m for m in existing if m.id == body.member_id), None)
+                if chosen is None or chosen.relationship != subject:
+                    raise HTTPException(422, "member_id doesn't match a relative with that relationship")
+                target.id = chosen.id  # merge_into matches on id first
+            else:
+                chosen = find_match(existing, target)
+            subject_member_id = chosen.id if chosen else target.id
+            members = [target]
             # Their family history is yours too, when the relationship can be worked out (their mother = your grandmother).
             for r in body.family:
                 mine = compose(subject, r.relationship)
                 if mine and r.conditions:
                     members.append(FamilyMember(relationship=mine, conditions=conditions(r.conditions), source=source))
             fragment = HealthProfile(family=members)
-            if body.medications or body.observations:
-                warnings.append("Medicines and test results are kept only on your own record, so they were not added for your relative.")
         result = ingest(user_id, "document", json.dumps({"document_id": doc_id, "subject": body.subject}),
                         fragment, preview=False, warnings=warnings)
         store.save_document(user_id, doc_id, doc_type=body.doc_type,
                             doc_date=body.doc_date.isoformat() if body.doc_date else None, subject=body.subject,
+                            subject_member_id=subject_member_id,
                             # Keep what was read (patient, facility...) with the items as the user kept them.
                             extraction=doc["extraction"] | body.model_dump(
                                 mode="json", include={"doc_type", "doc_date", "conditions", "medications",
