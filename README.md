@@ -25,6 +25,12 @@ is in **[mobile/](mobile/README.md)**.
 One click deploys the API, web dashboard, clinic portal and the mobile app as a web app (`/app`). See
 [docs/DEPLOY.md](docs/DEPLOY.md) for plans, secrets and the steps before real patient data.
 
+## How changes ship
+
+Every pull request is tested, reviewed by a Claude review agent and, once approved and green, merged by a merge
+agent, with no manual merge step. See [docs/AUTOMATION.md](docs/AUTOMATION.md) (one-time setup: add the
+`ANTHROPIC_API_KEY` repository secret).
+
 ## Quick start
 
 ```bash
