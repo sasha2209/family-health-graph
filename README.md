@@ -71,6 +71,7 @@ then reload the first window.
 | **FHIR R4** (`fhir.py`) | `Patient`, `Condition`, `Observation` (incl. BP panels), `MedicationStatement/Request`, `FamilyMemberHistory`. Maps SNOMED CT, ICD-10-CM, LOINC and HL7 v3 RoleCodes. Full export too (round-trip tested). |
 | **Free text** (`text.py`) | "Grandpa on my father's side died of colon cancer when he was 72", "my mother and sister both had breast and ovarian cancer", "in her late 50s" (stored as ~58, flagged as estimated), "my other sister…". Deterministic, with a **preview** mode so users confirm before saving. |
 | **CSV** (`csv_import.py`) | `relationship,condition,age_at_diagnosis,sex,deceased,name`, with per-row warnings. |
+| **Photos & PDFs** (`fhg/documents/`) | Prescriptions, lab reports, discharge summaries. Read on the server (PDF text layer or Tesseract OCR, then rules for Indian formats); an AI reader is an opt-in, token-light fallback. The user reviews before anything is saved, and a relative's document feeds their history. See [docs/DOCUMENT_UPLOAD.md](docs/DOCUMENT_UPLOAD.md). |
 
 Terminology normalization (`terminology.py`) maps everything onto canonical concepts
 (e.g. `breast_cancer`, `coronary_artery_disease`). Adding a concept is a data change.
@@ -122,6 +123,7 @@ Design principles:
 | `GET /v1/auth/me` · `GET /v1/auth/sessions` · `DELETE /v1/auth/sessions/{id}` · `POST /v1/auth/logout` | Account, signed-in devices, sign a device out |
 | `GET /v1/profile` · `PUT /v1/profile/demographics` | Read profile / set sex & birth date |
 | `POST /v1/ingest/fhir` · `/text` · `/csv` (`?preview=true`) | Import data |
+| `POST /v1/documents` · `POST /v1/documents/{id}/save` · `GET /v1/documents[/{id}[/file]]` · `DELETE /v1/documents/{id}` | Upload a photo/PDF, review what was read, save it to your record or a relative's |
 | `POST /v1/family` · `DELETE /v1/family/{id}` · `POST /v1/observations` | Manual entry |
 | `GET /v1/insights` · `GET /v1/insights/summary` | Insight report / plain-language summary |
 | `GET/POST /v1/consents` | View, grant, revoke consent |
@@ -157,6 +159,7 @@ Design principles:
 | `FHG_ADMIN_KEY` | unset (research export disabled) | |
 | `FHG_PSEUDONYM_SECRET` | dev value | HMAC key for research IDs |
 | `ANTHROPIC_API_KEY`, `FHG_LLM_MODEL` | unset, `claude-opus-5-5` | Optional AI summaries |
+| `FHG_DOC_MODEL` | `claude-opus-5-5` | Model for the document-reading fallback (only used for documents OCR and rules can't read, and only with the user's consent) |
 | `FHG_AUTH_SECRET` | dev value | Keys email lookups and sign-in codes; **set a long random value in production** |
 | `FHG_EMAIL_BACKEND` | `console` | `console` prints sign-in emails to the server log; `smtp` sends them using `FHG_SMTP_HOST`, `FHG_SMTP_PORT`, `FHG_SMTP_USERNAME`, `FHG_SMTP_PASSWORD`, `FHG_EMAIL_FROM` |
 | `FHG_APPLE_AUDIENCES` | unset (off) | Your iOS bundle ID (and web Services ID) to enable Sign in with Apple |

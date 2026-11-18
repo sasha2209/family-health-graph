@@ -185,6 +185,31 @@ CREATE TABLE IF NOT EXISTS notifications (
     created_at TEXT NOT NULL,
     read_at TEXT
 );
+-- Uploaded medical documents. The file, OCR text and extraction are encrypted.
+-- subject: "self", or the relationship of a relative whose document this is.
+CREATE TABLE IF NOT EXISTS documents (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,             -- review | saved | discarded
+    doc_type TEXT NOT NULL,
+    doc_date TEXT,
+    subject TEXT NOT NULL DEFAULT 'self',
+    filename TEXT,
+    media_type TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    file BLOB,
+    text BLOB NOT NULL,
+    extraction BLOB NOT NULL,
+    method TEXT NOT NULL,             -- pdf_text | ocr | none
+    ocr_confidence REAL,
+    ai_model TEXT,
+    ai_mode TEXT,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    saved_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id, created_at);
 """
 
 
@@ -726,6 +751,70 @@ class Store:
         with self._lock, self._conn:
             self._conn.execute("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL",
                                (_now(), user_id))
+
+    # --- documents -----------------------------------------------------------
+    def create_document(self, user_id: str, *, doc_type: str, doc_date: Optional[str], filename: Optional[str],
+                        media_type: str, file: bytes, text: str, extraction: dict, method: str,
+                        ocr_confidence: Optional[float], ai_model: Optional[str], ai_mode: Optional[str],
+                        input_tokens: int, output_tokens: int, keep_file: bool = True) -> str:
+        doc_id = uuid.uuid4().hex[:16]
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO documents (id, user_id, status, doc_type, doc_date, filename, media_type, size, file, text, "
+                "extraction, method, ocr_confidence, ai_model, ai_mode, input_tokens, output_tokens, created_at) "
+                "VALUES (?, ?, 'review', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (doc_id, user_id, doc_type, doc_date, filename, media_type, len(file),
+                 self._cipher.encrypt_bytes(file) if keep_file else None, self._cipher.encrypt(text),
+                 self._cipher.encrypt(json.dumps(extraction)), method, ocr_confidence, ai_model, ai_mode,
+                 input_tokens, output_tokens, _now()))
+        return doc_id
+
+    def _doc_row(self, r: sqlite3.Row, full: bool) -> dict:
+        out = {k: r[k] for k in ("id", "status", "doc_type", "doc_date", "subject", "filename", "media_type", "size",
+                                 "method", "ocr_confidence", "ai_model", "ai_mode", "input_tokens", "output_tokens",
+                                 "created_at", "saved_at")}
+        out["has_file"] = r["has_file"]
+        if full:
+            out["extraction"] = json.loads(self._cipher.decrypt(r["extraction"]))
+            out["text"] = self._cipher.decrypt(r["text"])
+        return out
+
+    _DOC_COLS = ("id, status, doc_type, doc_date, subject, filename, media_type, size, method, ocr_confidence, ai_model, "
+                 "ai_mode, input_tokens, output_tokens, created_at, saved_at, file IS NOT NULL AS has_file")
+
+    def document(self, user_id: str, doc_id: str) -> Optional[dict]:
+        rows = self._query(f"SELECT {self._DOC_COLS}, extraction, text FROM documents WHERE id = ? AND user_id = ?",
+                           (doc_id, user_id))
+        return self._doc_row(rows[0], full=True) if rows else None
+
+    def documents(self, user_id: str) -> list[dict]:
+        rows = self._query(f"SELECT {self._DOC_COLS} FROM documents WHERE user_id = ? AND status != 'discarded' "
+                           "ORDER BY COALESCE(doc_date, substr(created_at, 1, 10)) DESC, created_at DESC", (user_id,))
+        return [self._doc_row(r, full=False) for r in rows]
+
+    def document_file(self, user_id: str, doc_id: str) -> Optional[tuple[str, bytes, Optional[str]]]:
+        rows = self._query("SELECT media_type, file, filename FROM documents WHERE id = ? AND user_id = ?", (doc_id, user_id))
+        if not rows or rows[0]["file"] is None:
+            return None
+        return rows[0]["media_type"], self._cipher.decrypt_bytes(rows[0]["file"]), rows[0]["filename"]
+
+    def save_document(self, user_id: str, doc_id: str, *, doc_type: str, doc_date: Optional[str], subject: str,
+                      extraction: dict) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE documents SET status = 'saved', doc_type = ?, doc_date = ?, subject = ?, extraction = ?, saved_at = ? "
+                "WHERE id = ? AND user_id = ?",
+                (doc_type, doc_date, subject, self._cipher.encrypt(json.dumps(extraction)), _now(), doc_id, user_id))
+
+    def delete_document(self, user_id: str, doc_id: str) -> bool:
+        with self._lock, self._conn:
+            cur = self._conn.execute("DELETE FROM documents WHERE id = ? AND user_id = ?", (doc_id, user_id))
+        return cur.rowcount > 0
+
+    def documents_this_hour(self, user_id: str) -> int:
+        since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        return self._query("SELECT COUNT(*) AS n FROM documents WHERE user_id = ? AND created_at > ?",
+                           (user_id, since))[0]["n"]
 
     # --- deletion ----------------------------------------------------------
     def delete_user(self, user_id: str) -> None:

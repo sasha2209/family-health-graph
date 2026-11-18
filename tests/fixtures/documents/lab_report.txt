@@ -1,0 +1,21 @@
+SUNRISE DIAGNOSTICS & PATHOLOGY LAB
+NABL Accredited | Ph: 080-41234567 | www.sunrisediag.example
+Patient Name : Mrs. Sunita Shah          Age/Sex : 62 Y / F
+Ref. By : Dr. Anil Mehta MD               Sample Collected : 14/03/2026
+Reported : 15-Mar-2026 10:42
+Test Name                         Result     Unit      Biological Ref. Interval
+HbA1c (Glycosylated Haemoglobin)   7.8   H   %         4.0 - 5.6
+Method: HPLC
+Estimated Average Glucose          177       mg/dL
+Interpretation: Non diabetic < 5.7 ; Prediabetes 5.7 - 6.4 ; Diabetes >= 6.5
+Glucose, Fasting (FBS)             142   H   mg/dL     70 - 100
+LIPID PROFILE
+Total Cholesterol                  238       mg/dL     < 200
+Triglycerides                      190       mg/dL     < 150
+HDL Cholesterol                    38    L   mg/dL     > 40
+LDL Cholesterol, Direct            162   H   mg/dL     < 100
+VLDL Cholesterol                   38        mg/dL     < 30
+LDL/HDL Ratio                      4.3                 < 3.5
+TSH (Ultrasensitive)               3.2       µIU/mL    0.4 - 4.2
+Serum Creatinine                   0.9       mg/dL     0.6 - 1.1
+Vitamin D (25-OH)                  14.2  L   ng/mL     30 - 100

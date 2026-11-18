@@ -2,11 +2,14 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { View } from 'react-native';
 
+import { Row, Section } from '../components/list';
+import { ScanCard } from '../components/ScanCard';
 import { Body, Button, Card, ErrorText, Field, H2, Screen, styles } from '../components/ui';
 import { publicApi } from '../lib/api';
-import { capitalize, label } from '../lib/format';
+import { capitalize, DOC_TYPE_LABEL, formatDay, label } from '../lib/format';
 import { useSession } from '../lib/session';
 import type { Profile } from '../lib/types';
+import { useLoader } from '../lib/useLoader';
 
 function describe(parsed: Profile): string[] {
   const lines = parsed.family.map((m) =>
@@ -29,6 +32,7 @@ export default function AddHistory() {
   const [preview, setPreview] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { data: documents } = useLoader(() => api.documents());
 
   async function run(fn: () => Promise<void>) {
     setBusy(true); setError(null);
@@ -37,7 +41,10 @@ export default function AddHistory() {
 
   return (
     <Screen>
+      <ScanCard />
+
       <Card>
+        <H2>Or describe it</H2>
         <Field
           label="Describe your family's health"
           value={text}
@@ -73,12 +80,20 @@ export default function AddHistory() {
         </Card>
       )}
 
+      {documents && documents.length > 0 && (
+        <Section title="Your documents">
+          {documents.map((d, i) => (
+            <Row key={d.id} title={`${DOC_TYPE_LABEL[d.doc_type]}${d.subject !== 'self' ? ` · ${label(d.subject)}` : ''}`}
+                 detail={`${formatDay(d.doc_date)}${d.status === 'review' ? ' · waiting for your review' : ''}`}
+                 onPress={() => router.push({ pathname: '/document/[id]', params: { id: d.id } })}
+                 last={i === documents.length - 1} />
+          ))}
+        </Section>
+      )}
+
       <Card>
-        <H2>Have health records?</H2>
-        <Body muted>
-          Importing from Apple Health or your patient portal is coming. For now you can load a sample
-          record to explore the app.
-        </Body>
+        <H2>Just exploring?</H2>
+        <Body muted>Load a sample record to see what the app does with a full history.</Body>
         <View style={styles.row}>
           <Button title="Load sample record" onPress={() => run(async () => {
             await api.ingestFhir(await publicApi.sampleRecord());

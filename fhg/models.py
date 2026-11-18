@@ -142,6 +142,8 @@ class Medication(BaseModel):
     id: str = Field(default_factory=_id)
     name: str
     status: str = "active"
+    dosage: Optional[str] = None  # as written, e.g. "500 mg, 1-0-1 after food, 30 days"
+    prescribed_on: Optional[date] = None
     source: str = "manual"
 
 

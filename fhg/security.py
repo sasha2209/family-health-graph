@@ -31,6 +31,12 @@ class FieldCipher:
     def decrypt(self, token: bytes) -> str:
         return self._fernet.decrypt(token).decode("utf-8")
 
+    def encrypt_bytes(self, data: bytes) -> bytes:
+        return self._fernet.encrypt(data)
+
+    def decrypt_bytes(self, token: bytes) -> bytes:
+        return self._fernet.decrypt(token)
+
 
 def fernet_key(secret: str) -> bytes:
     """Use ``secret`` as a Fernet key if it is one; otherwise derive one from it.

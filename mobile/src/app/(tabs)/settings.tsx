@@ -14,6 +14,7 @@ import type { Sex } from '../../lib/types';
 import { useLoader } from '../../lib/useLoader';
 
 const AI_SCOPE = 'ai_summary';
+const AI_DOCS_SCOPE = 'ai_document_reading';
 
 function confirmDestructive(title: string, message: string, onOk: () => void, okText = 'Delete') {
   if (Platform.OS === 'web') {
@@ -44,13 +45,14 @@ export default function SettingsScreen() {
     const [profile, consents, me, sessions, pushState, clinics] = await Promise.all([
       api.profile(false), api.consents(), api.me(), api.sessions(), api.pushStatus(), api.clinics()]);
     return { profile, me, sessions, clinics, push: pushState.registered,
-             ai: consents.consents.some((x) => x.scope === AI_SCOPE && x.active) };
+             ai: consents.consents.some((x) => x.scope === AI_SCOPE && x.active),
+             aiDocs: consents.consents.some((x) => x.scope === AI_DOCS_SCOPE && x.active) };
   });
   const [birth, setBirth] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
   if (!data) return <Screen>{error ? <ErrorText>{error}</ErrorText> : <Loading />}</Screen>;
-  const { profile, ai, me, sessions, push, clinics } = data;
+  const { profile, ai, aiDocs, me, sessions, push, clinics } = data;
   const support = pushSupport();
   const birthValue = birth ?? profile.birth_date ?? '';
 
@@ -178,6 +180,21 @@ export default function SettingsScreen() {
             value={ai}
             trackColor={{ true: c.accent, false: c.border }}
             onValueChange={async (v) => { await api.setConsent(AI_SCOPE, v); reload(); }}
+          />
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 14 }}>
+          <View style={{ flex: 1 }}>
+            <Body>AI reading for hard-to-read documents</Body>
+            <Body muted style={{ fontSize: 13 }}>
+              Documents are read on our server first. Only when that fails (handwriting, a blurry photo) is the
+              text, or one reduced image, sent to an AI model. You always review the result.
+            </Body>
+          </View>
+          <Switch
+            accessibilityLabel="AI reading for hard-to-read documents"
+            value={aiDocs}
+            trackColor={{ true: c.accent, false: c.border }}
+            onValueChange={async (v) => { await api.setConsent(AI_DOCS_SCOPE, v); reload(); }}
           />
         </View>
         <View style={styles.row}>

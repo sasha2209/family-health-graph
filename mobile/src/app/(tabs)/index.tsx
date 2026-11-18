@@ -28,13 +28,15 @@ export default function HomeScreen() {
   const c = usePalette();
   const { api } = useSession();
   const { data, error, refreshing, reload } = useLoader(async () => {
-    const [report, notes, own, links, me, push, referrals] = await Promise.all([
+    const [report, notes, own, links, me, push, referrals, documents] = await Promise.all([
       api.insights(), api.notifications(), api.profile(false), api.links(), api.me(), api.pushStatus(),
-      api.referrals()]);
+      api.referrals(), api.documents()]);
     const rels = new Set(own.family.map((m) => m.relationship));
     const steps: { title: string; detail: string; done: boolean; href: Href }[] = [
       { title: 'Add your family’s health history', detail: 'Start with what you know. A sentence or two is fine.',
         done: own.family.length > 0, href: '/add-history' },
+      { title: 'Add a lab report or prescription', detail: 'Snap a photo. Real results make insights sharper.',
+        done: documents.some((d) => d.status === 'saved'), href: '/add-history' },
       { title: 'Add both parents', detail: 'Parents’ diagnoses, and their ages, matter most.',
         done: rels.has('mother') && rels.has('father'), href: '/add-history' },
       { title: 'Add your grandparents', detail: 'Patterns on one side of the family change screening advice.',
