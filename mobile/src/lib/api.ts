@@ -13,6 +13,8 @@ import type {
   DocumentSummary,
   CreatedInvite,
   Activity,
+  Booking,
+  TestOffer,
   Connection,
   Grant,
   OAuthRequestInfo,
@@ -127,6 +129,15 @@ export function createApi(token: string | null) {
       authed<{ redirect_to: string }>('/v1/oauth/deny', { method: 'POST', body }),
     grants: () => authed<Grant[]>('/v1/grants'),
     revokeGrant: (id: string) => authed<void>(`/v1/grants/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    insightTests: (ruleId: string) =>
+      authed<{ tests: TestOffer[]; bookings: Booking[] }>(`/v1/insights/${encodeURIComponent(ruleId)}/tests`),
+    book: (body: { partner_id: string; tests: string[]; rule_id?: string; preferred_date?: string; slot?: string;
+                   contact: { name: string; phone: string; address?: string; pincode?: string } }) =>
+      authed<Booking>('/v1/bookings', { method: 'POST', body }),
+    bookings: () => authed<Booking[]>('/v1/bookings'),
+    cancelBooking: (id: string) => authed<Booking>(`/v1/bookings/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+    bookingDoneElsewhere: (id: string) =>
+      authed<Booking>(`/v1/bookings/${encodeURIComponent(id)}/done-elsewhere`, { method: 'POST' }),
     inbound: () => authed<InboundInfo>('/v1/inbound'),
     rotateInboundEmail: () => authed<InboundInfo>('/v1/inbound/email/rotate', { method: 'POST' }),
     whatsappCode: () => authed<{ code: string; message: string; number: string; expires_in_minutes: number }>(

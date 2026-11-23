@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
-from . import auth, clinic, i18n, inbound, partners, push, trends
+from . import auth, bookings, clinic, i18n, inbound, partners, push, trends
 from .connectors import smart
 from . import partner_oauth as poauth
 from .clinician_report import render_html as clinician_report_html
@@ -279,6 +279,35 @@ class ClinicConnectIn(CodeIn):
     # How the patient wants to appear to the clinic, e.g. "Priya Shah, DOB 2 May 1984".
     display_name: str = Field(..., min_length=2, max_length=120)
     source: str = Field("code", pattern="^(code|link)$")  # 'link' when joining from a clinic's intake link
+
+
+class CatalogItemIn(BaseModel):
+    test: str
+    price_inr: Optional[float] = Field(None, ge=0)
+    home_collection: bool = False
+    turnaround_days: Optional[int] = Field(None, ge=0, le=60)
+
+
+class ContactIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    phone: str = Field(..., pattern=r"^\+?[0-9 -]{7,20}$")
+    address: Optional[str] = Field(None, max_length=300)
+    pincode: Optional[str] = Field(None, pattern=r"^[0-9]{4,10}$")
+
+
+class BookingIn(BaseModel):
+    partner_id: str
+    tests: list[str] = Field(..., min_length=1, max_length=6)
+    rule_id: Optional[str] = None
+    preferred_date: Optional[date] = None
+    slot: Optional[str] = Field(None, pattern="^(morning|afternoon|evening)$")
+    contact: ContactIn
+
+
+class BookingStatusIn(BaseModel):
+    status: str = Field(..., pattern="^(scheduled|sample_collected|completed|cancelled)$")
+    scheduled_for: Optional[datetime] = None
+    note: Optional[str] = Field(None, max_length=500)
 
 
 class ReferralIn(BaseModel):
@@ -1661,6 +1690,157 @@ def create_app(settings: Optional[Settings] = None,
             raise HTTPException(404, "No such app access")
         store.audit(user_id, "user", "partner.consent_revoked", {"partner": g["partner_name"], "grant_id": grant_id})
         return Response(status_code=204)
+
+    # --- book a test from an action item, results back, reminders (docs/TEST_BOOKING.md) ---
+    @app.put("/admin/partners/{partner_id}/catalog", dependencies=[Depends(require_admin)])
+    def admin_partner_catalog(partner_id: str, items: list[CatalogItemIn]) -> dict:
+        if store.partner(partner_id) is None:
+            raise HTTPException(404, "No such partner")
+        unknown = [i.test for i in items if i.test not in bookings.TESTS]
+        if unknown:
+            raise HTTPException(422, f"Unknown tests {unknown}; available: {sorted(bookings.TESTS)}")
+        store.set_partner_catalog(partner_id, [i.model_dump() for i in items])
+        return {"partner_id": partner_id, "catalog": [i.model_dump() for i in items]}
+
+    @app.get("/admin/bookings/metrics", dependencies=[Depends(require_admin)])
+    def admin_booking_metrics() -> list[dict]:
+        return store.booking_metrics()
+
+    def booking_out(b: dict) -> dict:
+        return {k: v for k, v in b.items() if k not in ("user_id", "contact")} | {
+            "test_names": [bookings.TESTS[t]["name"] for t in b["tests"] if t in bookings.TESTS]}
+
+    @app.get("/v1/insights/{rule_id}/tests")
+    def insight_tests(rule_id: str, user_id: str = Depends(current_user)) -> dict:
+        """Tests that answer this action item, who offers them, and the person's bookings for it."""
+        return {"tests": bookings.offers(rule_id, store.partners_with_catalog()),
+                "bookings": [booking_out(b) for b in store.bookings_for_user(user_id) if b["rule_id"] == rule_id]}
+
+    @app.post("/v1/bookings", status_code=201)
+    def create_booking(body: BookingIn, user_id: str = Depends(current_user)) -> dict:
+        """Book tests with a partner. Only the tests, slot and these contact details are shared with them."""
+        partner = next((p for p in store.partners_with_catalog() if p["id"] == body.partner_id), None)
+        if partner is None:
+            raise HTTPException(404, "No such lab")
+        offered = {i["test"]: i for i in partner["catalog"]}
+        missing = [t for t in body.tests if t not in offered]
+        if missing:
+            raise HTTPException(422, f"{partner['name']} doesn't offer {missing}")
+        price = sum(offered[t].get("price_inr") or 0 for t in body.tests) or None
+        booking_id = store.create_booking(
+            user_id, partner["id"], body.rule_id, body.tests,
+            body.preferred_date.isoformat() if body.preferred_date else None, body.slot,
+            body.contact.model_dump(), price)
+        store.audit(user_id, "user", "booking.created", {"booking_id": booking_id, "partner": partner["name"],
+                                                          "tests": body.tests, "shared": ["tests", "slot", "contact"]})
+        partner_hooks.notify_event(partner["id"], "booking.created", {"booking_id": booking_id})
+        return booking_out(store.booking(booking_id))
+
+    @app.get("/v1/bookings")
+    def my_bookings(user_id: str = Depends(current_user)) -> list[dict]:
+        return [booking_out(b) for b in store.bookings_for_user(user_id)]
+
+    def own_booking(user_id: str, booking_id: str) -> dict:
+        b = store.booking(booking_id)
+        if b is None or b["user_id"] != user_id:
+            raise HTTPException(404, "No such booking")
+        return b
+
+    @app.post("/v1/bookings/{booking_id}/cancel")
+    def cancel_booking(booking_id: str, user_id: str = Depends(current_user)) -> dict:
+        b = own_booking(user_id, booking_id)
+        if b["status"] not in bookings.ACTIVE:
+            raise HTTPException(409, "This booking can't be cancelled now")
+        store.update_booking(booking_id, status="cancelled", note="Cancelled by the patient")
+        store.audit(user_id, "user", "booking.cancelled", {"booking_id": booking_id})
+        partner_hooks.notify_event(b["partner_id"], "booking.updated", {"booking_id": booking_id})
+        return booking_out(store.booking(booking_id))
+
+    @app.post("/v1/bookings/{booking_id}/done-elsewhere")
+    def booking_done_elsewhere(booking_id: str, user_id: str = Depends(current_user)) -> dict:
+        """The person had the test somewhere else; stops reminders. Results can be added as a document."""
+        b = own_booking(user_id, booking_id)
+        if b["status"] not in bookings.ACTIVE:
+            raise HTTPException(409, "This booking is already closed")
+        store.update_booking(booking_id, status="completed_elsewhere")
+        partner_hooks.notify_event(b["partner_id"], "booking.updated", {"booking_id": booking_id})
+        return booking_out(store.booking(booking_id))
+
+    def partner_booking(partner: dict, booking_id: str) -> dict:
+        b = store.booking(booking_id, with_contact=True)
+        if b is None or b["partner_id"] != partner["id"]:
+            raise HTTPException(404, "No such booking")
+        return b
+
+    def partner_booking_out(b: dict) -> dict:
+        return {"booking_id": b["id"], "status": b["status"], "tests": [
+            {"code": t, "name": bookings.TESTS[t]["name"], "prep": bookings.TESTS[t]["prep"]} for t in b["tests"]],
+            "preferred_date": b["preferred_date"], "slot": b["slot"], "scheduled_for": b["scheduled_for"],
+            "price_inr": b["price_inr"], "contact": b["contact"], "created_at": b["created_at"]}
+
+    @app.get("/v1/partner/bookings")
+    def partner_bookings(status: Optional[str] = Query(None), partner: dict = Depends(current_partner)) -> list[dict]:
+        return [partner_booking_out(b) for b in store.bookings_for_partner(partner["id"], status)]
+
+    @app.get("/v1/partner/bookings/{booking_id}")
+    def partner_booking_detail(booking_id: str, partner: dict = Depends(current_partner)) -> dict:
+        b = partner_booking(partner, booking_id)
+        store.audit(b["user_id"], f"partner:{partner['id']}", "booking.viewed", {"partner": partner["name"]})
+        return partner_booking_out(b)
+
+    @app.post("/v1/partner/bookings/{booking_id}/status")
+    def partner_booking_status(booking_id: str, body: BookingStatusIn, partner: dict = Depends(current_partner)) -> dict:
+        b = partner_booking(partner, booking_id)
+        if b["status"] not in bookings.ACTIVE:
+            raise HTTPException(409, f"The booking is {b['status']}")
+        store.update_booking(booking_id, status=body.status,
+                             scheduled_for=body.scheduled_for.isoformat() if body.scheduled_for else None, note=body.note)
+        store.audit(b["user_id"], f"partner:{partner['id']}", f"booking.{body.status}", {"partner": partner["name"]})
+        names = ", ".join(bookings.TESTS[t]["name"].split(" (")[0] for t in b["tests"])
+        msg = {"scheduled": f"{partner['name']} confirmed your {names}"
+                            + (f" for {formatday(body.scheduled_for.isoformat())}" if body.scheduled_for else "") + ".",
+               "sample_collected": f"{partner['name']} has collected your sample. Results will appear in the app.",
+               "completed": f"{partner['name']} has completed your {names}.",
+               "cancelled": f"{partner['name']} cancelled your {names} booking" + (f": {body.note}" if body.note else ".")}[body.status]
+        notifier.notify(b["user_id"], "booking", msg)
+        return partner_booking_out(store.booking(booking_id, with_contact=True))
+
+    @app.post("/v1/partner/bookings/{booking_id}/results")
+    def partner_booking_results(booking_id: str, bundle: dict, partner: dict = Depends(current_partner)) -> dict:
+        """Results as FHIR R4 Observations (a Bundle or one Observation), LOINC-coded. They go straight into the
+        person's record and the booking is completed."""
+        b = partner_booking(partner, booking_id)
+        if b["status"] not in bookings.ACTIVE and b["status"] != "completed":
+            raise HTTPException(409, f"The booking is {b['status']}")
+        try:
+            fragment = parse_fhir(bundle, source=f"partner:{partner['id']}:booking:{booking_id}")
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        allowed = set().union(*(bookings.TESTS[t]["observations"] for t in b["tests"]))
+        kept = [o for o in fragment.observations if o.code in allowed]
+        if not kept:
+            raise HTTPException(422, f"No results for the booked tests; expected LOINC-coded {sorted(allowed)}")
+        result = ingest(b["user_id"], "partner_results", json.dumps({"booking_id": booking_id}),
+                        HealthProfile(observations=kept), preview=False)
+        store.update_booking(booking_id, status="completed")
+        store.audit(b["user_id"], f"partner:{partner['id']}", "booking.results", {"partner": partner["name"],
+                                                                                   "results": len(kept)})
+        notifier.notify(b["user_id"], "booking", f"Your test results from {partner['name']} are in. "
+                                                 "Your insights have been updated.")
+        return {"accepted": len(kept), "ignored": len(fragment.observations) - len(kept), "merged": result["merged"]}
+
+    @app.post("/admin/tasks/reminders", dependencies=[Depends(require_admin)])
+    def run_reminders() -> dict:
+        """Follow up until tests are booked and done. Run daily (e.g. a Render cron job calling this endpoint)."""
+        now, sent = bookings.utcnow(), 0
+        for uid in store.user_ids():
+            mine = store.bookings_for_user(uid)
+            report = generate_insights(effective_profile(store, uid))
+            for key, kind, message in bookings.due_reminders(now, report.insights, mine, store.nudges(uid)):
+                notifier.notify(uid, kind, message)
+                store.record_nudge(uid, key, now.isoformat())
+                sent += 1
+        return {"sent": sent}
 
     @app.get("/v1/referrals")
     def my_referrals(user_id: str = Depends(current_user)) -> list[dict]:

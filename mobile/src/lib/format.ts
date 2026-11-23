@@ -77,3 +77,14 @@ export function monthYear(iso: string | null): string {
   const [y, m] = iso.split('-').map(Number);
   return `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1]} ${y}`;
 }
+
+export const BOOKING_LABEL: Record<string, string> = {
+  requested: 'Requested, waiting for the lab to confirm',
+  scheduled: 'Confirmed',
+  sample_collected: 'Sample collected, results pending',
+  completed: 'Done, results in your record',
+  cancelled: 'Cancelled',
+  completed_elsewhere: 'Done elsewhere',
+};
+
+export const rupees = (n: number | null | undefined) => (n == null ? '' : `₹${Math.round(n).toLocaleString('en-IN')}`);
