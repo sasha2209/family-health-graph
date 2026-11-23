@@ -88,7 +88,19 @@ integration. ⭐ marks the ones with the biggest effect for an India-first launc
 
 ## Suggested order
 
-1. **Now (free, high impact):** the Indian brand → generic medicine list, the Hindi OCR pack, and the IDRS and WHO
-   South Asia risk charts. Together they make Indian prescriptions read properly and insights India-specific.
+1. **Now (free, high impact):**
+   - ✅ **Indian brand → generic medicine list:** `fhg/data/india_medicines.csv`, a curated starter list of 100+
+     common brands with their generic and drug class (`fhg/medicines.py`). Prescriptions show the generic, and the
+     same medicine under different brands merges. Verify the list before clinical use; extend it from CDSCO/NPPA
+     data, or license CIMS/MIMS for full coverage.
+   - ✅ **IDRS (Indian Diabetes Risk Score):** the `indian_diabetes_risk` insight. It scores age, waist, physical
+     activity and parental diabetes using the published MDRF bands (Mohan et al., 2005), and the app asks the two
+     extra questions.
+   - ⏳ **WHO South Asia CVD risk charts (2019):** not added yet. The chart data or model coefficients have to come
+     from the WHO HEARTS technical package or the Lancet Global Health 2019 paper's supplement; those sources weren't
+     reachable from our build environment, and we won't transcribe risk tables from memory. The only machine-readable
+     source found (the `whoishRisk` R package) contains the older 2007 WHO/ISH charts under a GPL-3 licence.
+     Next step: get the official 2019 tables from WHO, then implement and test them cell by cell.
+   - The Hindi OCR pack (`tesseract-ocr-hin`).
 2. **Next:** NFHS-5 / ICMR-INDIAB for state-level context, ClinVar for genetic reports, and the ABDM sandbox.
 3. **With revenue or partners:** CIMS/MIMS for medicine safety, CanRisk for hereditary-cancer partners, and lab APIs.

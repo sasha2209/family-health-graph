@@ -11,6 +11,7 @@ from datetime import date
 from typing import Optional
 
 from ..ingest.text import parse_family_history_text
+from ..medicines import lookup as lookup_medicine
 from ..terminology import CONCEPTS_BY_CATEGORY, OBSERVATION_TO_LOINC, category_from_text
 from .models import Extraction, ExtractedCondition, ExtractedMedication, ExtractedObservation, ExtractedRelative, PatientInfo
 
@@ -232,7 +233,10 @@ def find_medications(lines: list[str], in_rx_section: list[bool]) -> list[Extrac
         dur = _DUR_RE.search(body[cut:])
         if dur:
             parts.append(dur.group(0).lstrip("x× ").strip())
-        meds.append(ExtractedMedication(name=name.strip(), dosage=", ".join(parts) or None, evidence=line.strip()))
+        info = lookup_medicine(name)
+        meds.append(ExtractedMedication(name=name.strip(), dosage=", ".join(parts) or None, evidence=line.strip(),
+                                        generic=info.generic if info else None,
+                                        drug_class=info.drug_class if info else None))
     return meds
 
 

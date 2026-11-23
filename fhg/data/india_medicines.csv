@@ -1,0 +1,108 @@
+brand,generic,drug_class
+Glycomet,metformin,Biguanide (diabetes)
+Glyciphage,metformin,Biguanide (diabetes)
+Obimet,metformin,Biguanide (diabetes)
+Gluconorm,metformin,Biguanide (diabetes)
+Amaryl,glimepiride,Sulfonylurea (diabetes)
+Glimisave,glimepiride,Sulfonylurea (diabetes)
+Zoryl,glimepiride,Sulfonylurea (diabetes)
+Amaryl M,glimepiride + metformin,Diabetes combination
+Glimisave M,glimepiride + metformin,Diabetes combination
+Gemer,glimepiride + metformin,Diabetes combination
+Glycomet GP,glimepiride + metformin,Diabetes combination
+Glynase,glipizide,Sulfonylurea (diabetes)
+Diamicron,gliclazide,Sulfonylurea (diabetes)
+Januvia,sitagliptin,DPP-4 inhibitor (diabetes)
+Istavel,sitagliptin,DPP-4 inhibitor (diabetes)
+Janumet,sitagliptin + metformin,Diabetes combination
+Istamet,sitagliptin + metformin,Diabetes combination
+Galvus,vildagliptin,DPP-4 inhibitor (diabetes)
+Galvus Met,vildagliptin + metformin,Diabetes combination
+Jalra,vildagliptin,DPP-4 inhibitor (diabetes)
+Trajenta,linagliptin,DPP-4 inhibitor (diabetes)
+Tenepride,teneligliptin,DPP-4 inhibitor (diabetes)
+Forxiga,dapagliflozin,SGLT2 inhibitor (diabetes)
+Jardiance,empagliflozin,SGLT2 inhibitor (diabetes)
+Volibo,voglibose,Alpha-glucosidase inhibitor (diabetes)
+Lantus,insulin glargine,Insulin
+Basalog,insulin glargine,Insulin
+Huminsulin,human insulin,Insulin
+Mixtard,human insulin (premixed),Insulin
+Novomix,insulin aspart (premixed),Insulin
+Telma,telmisartan,Angiotensin receptor blocker (blood pressure)
+Telsar,telmisartan,Angiotensin receptor blocker (blood pressure)
+Telma H,telmisartan + hydrochlorothiazide,Blood pressure combination
+Telma AM,telmisartan + amlodipine,Blood pressure combination
+Losar,losartan,Angiotensin receptor blocker (blood pressure)
+Repace,losartan,Angiotensin receptor blocker (blood pressure)
+Olmezest,olmesartan,Angiotensin receptor blocker (blood pressure)
+Olsar,olmesartan,Angiotensin receptor blocker (blood pressure)
+Amlong,amlodipine,Calcium channel blocker (blood pressure)
+Stamlo,amlodipine,Calcium channel blocker (blood pressure)
+Amlopres,amlodipine,Calcium channel blocker (blood pressure)
+Cilacar,cilnidipine,Calcium channel blocker (blood pressure)
+Cardace,ramipril,ACE inhibitor (blood pressure)
+Envas,enalapril,ACE inhibitor (blood pressure)
+Metolar,metoprolol,Beta blocker
+Met XL,metoprolol,Beta blocker
+Concor,bisoprolol,Beta blocker
+Nebicard,nebivolol,Beta blocker
+Aten,atenolol,Beta blocker
+Lasix,furosemide,Diuretic
+Dytor,torsemide,Diuretic
+Aldactone,spironolactone,Diuretic
+Atorva,atorvastatin,Statin (cholesterol)
+Storvas,atorvastatin,Statin (cholesterol)
+Lipvas,atorvastatin,Statin (cholesterol)
+Atocor,atorvastatin,Statin (cholesterol)
+Tonact,atorvastatin,Statin (cholesterol)
+Rosuvas,rosuvastatin,Statin (cholesterol)
+Rozavel,rosuvastatin,Statin (cholesterol)
+Crestor,rosuvastatin,Statin (cholesterol)
+Ecosprin,aspirin,Antiplatelet
+Ecosprin AV,aspirin + atorvastatin,Antiplatelet + statin
+Clopilet,clopidogrel,Antiplatelet
+Deplatt,clopidogrel,Antiplatelet
+Thyronorm,levothyroxine,Thyroid hormone
+Eltroxin,levothyroxine,Thyroid hormone
+Thyrox,levothyroxine,Thyroid hormone
+Neomercazole,carbimazole,Antithyroid
+Pan,pantoprazole,Proton pump inhibitor (acidity)
+Pantocid,pantoprazole,Proton pump inhibitor (acidity)
+Pan D,pantoprazole + domperidone,Acidity combination
+Razo,rabeprazole,Proton pump inhibitor (acidity)
+Omez,omeprazole,Proton pump inhibitor (acidity)
+Nexpro,esomeprazole,Proton pump inhibitor (acidity)
+Rantac,ranitidine,H2 blocker (acidity)
+Dolo,paracetamol,Analgesic / antipyretic
+Crocin,paracetamol,Analgesic / antipyretic
+Calpol,paracetamol,Analgesic / antipyretic
+Combiflam,ibuprofen + paracetamol,Analgesic combination
+Brufen,ibuprofen,NSAID (pain)
+Voveran,diclofenac,NSAID (pain)
+Zerodol,aceclofenac,NSAID (pain)
+Ultracet,tramadol + paracetamol,Analgesic combination
+Augmentin,amoxicillin + clavulanic acid,Antibiotic
+Azee,azithromycin,Antibiotic
+Azithral,azithromycin,Antibiotic
+Taxim O,cefixime,Antibiotic
+Zifi,cefixime,Antibiotic
+Ciplox,ciprofloxacin,Antibiotic
+Metrogyl,metronidazole,Antibiotic / antiprotozoal
+Montair,montelukast,Leukotriene antagonist (allergy/asthma)
+Montek LC,montelukast + levocetirizine,Allergy combination
+Allegra,fexofenadine,Antihistamine
+Cetzine,cetirizine,Antihistamine
+Levocet,levocetirizine,Antihistamine
+Asthalin,salbutamol,Bronchodilator (asthma)
+Budecort,budesonide,Inhaled steroid (asthma)
+Foracort,formoterol + budesonide,Asthma combination
+Seroflo,salmeterol + fluticasone,Asthma combination
+Shelcal,calcium carbonate + vitamin D3,Calcium supplement
+Uprise D3,cholecalciferol,Vitamin D
+Calcirol,cholecalciferol,Vitamin D
+Becosules,vitamin B complex,Vitamin supplement
+Neurobion Forte,vitamin B complex,Vitamin supplement
+Folvite,folic acid,Vitamin supplement
+Livogen,ferrous fumarate + folic acid,Iron supplement
+Orofer XT,ferrous ascorbate + folic acid,Iron supplement

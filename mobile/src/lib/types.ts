@@ -49,7 +49,10 @@ export interface FamilyMember {
   linked: boolean;
 }
 
-export interface Medication { id: string; name: string; dosage: string | null; prescribed_on: string | null; source?: string }
+export interface Medication {
+  id: string; name: string; dosage: string | null; prescribed_on: string | null; source?: string;
+  generic?: string | null; drug_class?: string | null;
+}
 export interface Observation { id: string; code: string; value: number; unit: string; effective_date: string | null }
 
 export interface FamilyMemberDetail extends FamilyMember {
@@ -65,7 +68,10 @@ export interface Profile {
   conditions: Condition[];
   observations?: Observation[];
   family: FamilyMember[];
+  activity?: Activity | null;
 }
+
+export type Activity = 'exercise_and_active_work' | 'exercise_or_active_work' | 'sedentary';
 
 export interface FamilyLink {
   link_id: string;
@@ -157,7 +163,9 @@ export interface DeviceSession {
 export type DocType = 'prescription' | 'lab_report' | 'discharge_summary' | 'other';
 
 export interface DocCondition { name: string; category: string | null; onset_age?: number | null; evidence?: string }
-export interface DocMedication { name: string; dosage: string | null; evidence?: string }
+export interface DocMedication {
+  name: string; dosage: string | null; evidence?: string; generic?: string | null; drug_class?: string | null;
+}
 export interface DocObservation {
   code: string; display?: string; value: number; unit: string; flag?: string | null; evidence?: string;
 }

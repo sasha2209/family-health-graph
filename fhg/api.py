@@ -139,6 +139,11 @@ class DemographicsIn(BaseModel):
     birth_date: Optional[date] = None
 
 
+class LifestyleIn(BaseModel):
+    activity: Optional[str] = Field(None, pattern="^(exercise_and_active_work|exercise_or_active_work|sedentary)$")
+    waist_cm: Optional[float] = Field(None, ge=40, le=200)
+
+
 class ConditionIn(BaseModel):
     name: str
     onset_age: Optional[int] = Field(None, ge=0, le=120)
@@ -568,6 +573,21 @@ def create_app(settings: Optional[Settings] = None,
             profile.touch()
             store.save_profile(profile)
         store.audit(user_id, "user", "profile.demographics")
+        return _dump(profile)
+
+    @app.put("/v1/profile/lifestyle")
+    def set_lifestyle(body: LifestyleIn, user_id: str = Depends(current_user)) -> dict:
+        """Physical activity and waist size: the two questions the Indian Diabetes Risk Score needs."""
+        with store.write_lock:
+            profile = store.get_profile(user_id)
+            if body.activity is not None:
+                profile.activity = body.activity
+            if body.waist_cm is not None:
+                profile.observations.append(Observation(code="waist_circumference", value=body.waist_cm, unit="cm",
+                                                        effective_date=date.today(), source="manual"))
+            profile.touch()
+            store.save_profile(profile)
+        store.audit(user_id, "user", "profile.lifestyle")
         return _dump(profile)
 
     @app.post("/v1/family", status_code=201)

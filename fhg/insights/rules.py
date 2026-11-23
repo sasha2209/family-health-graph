@@ -379,6 +379,83 @@ def diabetes_risk(p: HealthProfile) -> Optional[Insight]:
     )
 
 
+# --- Indian Diabetes Risk Score (MDRF) -------------------------------------------
+
+REF_IDRS = Reference(
+    title="Mohan V et al. A simplified Indian Diabetes Risk Score for screening for undiagnosed diabetic subjects. "
+          "J Assoc Physicians India 2005;53:759-63 (Madras Diabetes Research Foundation)",
+    url="https://pubmed.ncbi.nlm.nih.gov/?term=simplified+Indian+Diabetes+Risk+Score+Mohan+2005",
+)
+ACTIVITY_POINTS = {"exercise_and_active_work": 0, "exercise_or_active_work": 20, "sedentary": 30}
+ACTIVITY_LABEL = {"exercise_and_active_work": "regular exercise and an active job or housework",
+                  "exercise_or_active_work": "regular exercise or an active job, not both",
+                  "sedentary": "no regular exercise and mostly sitting"}
+
+
+def idrs(p: HealthProfile) -> Optional[dict]:
+    """The Indian Diabetes Risk Score (0-100): age, waist, physical activity and parents' diabetes.
+    Returns the score with its parts, or None without an age. Missing parts are listed, not guessed."""
+    age = p.age()
+    if age is None:
+        return None
+    parts: dict[str, int] = {"age": 0 if age < 35 else 20 if age < 50 else 30}
+    missing = []
+    waist = p.latest("waist_circumference")
+    sex = p.sex.value if p.sex else None
+    if waist and sex in ("female", "male"):
+        cm = waist.value * 2.54 if "in" in (waist.unit or "").lower() else waist.value
+        low, high = (80, 90) if sex == "female" else (90, 100)
+        parts["waist"] = 0 if cm < low else 10 if cm < high else 20
+    else:
+        missing.append("waist size" if waist is None else "sex")
+    if p.activity in ACTIVITY_POINTS:
+        parts["activity"] = ACTIVITY_POINTS[p.activity]
+    else:
+        missing.append("physical activity")
+    diabetic_parents = {m.relationship.value for m in p.family if m.relationship.value in ("mother", "father")
+                        and any(c.category == "type_2_diabetes" for c in m.conditions)}
+    parts["family"] = 10 * len(diabetic_parents)
+    return {"score": sum(parts.values()), "parts": parts, "missing": missing, "age": age,
+            "waist": waist, "parents": sorted(diabetic_parents)}
+
+
+def indian_diabetes_risk(p: HealthProfile) -> Optional[Insight]:
+    if p.own_conditions({"type_2_diabetes", "type_1_diabetes"}):
+        return None
+    a1c = p.latest("hba1c")
+    if a1c is not None and a1c.value >= 6.5:
+        return None  # already in the diabetes range: the diabetes insight covers it
+    r = idrs(p)
+    if r is None:
+        return None
+    score, missing = r["score"], r["missing"]
+    if missing and score < 60:
+        return None  # not enough to say anything yet; the app asks for the missing answers
+    evidence = [f"Age {r['age']}: {r['parts']['age']} points"]
+    if "waist" in r["parts"]:
+        evidence.append(f"Waist {r['waist'].value:g} {r['waist'].unit}: {r['parts']['waist']} points")
+    if "activity" in r["parts"]:
+        evidence.append(f"Activity ({ACTIVITY_LABEL[p.activity]}): {r['parts']['activity']} points")
+    evidence.append(f"Parents with diabetes: {' and '.join(r['parents']) or 'none recorded'}: {r['parts']['family']} points")
+    band = "high (60 or more)" if score >= 60 else "moderate (30–50)" if score >= 30 else "low (under 30)"
+    partial = f" It may be higher: we don't have your {' or '.join(missing)} yet." if missing else ""
+    return Insight(
+        rule_id="indian_diabetes_risk",
+        category="metabolic",
+        level=Level.MODERATE if score >= 60 else Level.INFO,
+        title=f"Indian Diabetes Risk Score: {score} of 100",
+        summary=(f"Your score is {band}. This score was developed and validated for Indian adults; scores of 60 "
+                 f"or more mean undiagnosed diabetes is much more likely.{partial}"),
+        evidence=evidence,
+        recommendation=(
+            "With a score of 60 or more, ask your doctor for a fasting blood sugar, HbA1c or glucose tolerance test."
+            if score >= 60 else
+            "Keep your weight and waist in check and stay active; re-check your score every year or if anything changes."
+        ),
+        references=[REF_IDRS, REF_ADA],
+    )
+
+
 # --- prostate cancer ------------------------------------------------------------
 
 def prostate_family_history(p: HealthProfile) -> Optional[Insight]:
@@ -533,6 +610,7 @@ ALL_RULES: list[Rule] = [
     familial_hypercholesterolemia,
     premature_ascvd,
     diabetes_risk,
+    indian_diabetes_risk,
     prostate_family_history,
     blood_pressure,
     record_gaps,

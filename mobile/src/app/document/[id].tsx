@@ -185,7 +185,9 @@ export default function DocumentReview() {
       {e.medications.length > 0 && (
         <Section title={self ? 'Medicines' : `${capitalize(label(subject))}’s medicines`}>
           {e.medications.map((m, i) => (
-            <Row key={`m${i}`} title={m.name} detail={m.dosage ?? undefined} leading={tick(`m${i}`)}
+            <Row key={`m${i}`} title={m.name}
+                 detail={[m.generic && !m.name.toLowerCase().includes(m.generic.split(' ')[0]) ? m.generic : null, m.dosage]
+                   .filter(Boolean).join(' · ') || undefined} leading={tick(`m${i}`)}
                  onPress={() => toggle(`m${i}`)} last={i === e.medications.length - 1} />
           ))}
         </Section>

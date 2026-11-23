@@ -16,7 +16,7 @@ const OBS_LABEL: Record<string, string> = {
   ldl_cholesterol: 'LDL cholesterol', hdl_cholesterol: 'HDL cholesterol', total_cholesterol: 'Total cholesterol',
   triglycerides: 'Triglycerides', lipoprotein_a: 'Lipoprotein(a)', tsh: 'TSH', hemoglobin: 'Hemoglobin',
   creatinine: 'Creatinine', egfr: 'eGFR', vitamin_d: 'Vitamin D', vitamin_b12: 'Vitamin B12', bmi: 'BMI',
-  systolic_bp: 'Blood pressure (top)', diastolic_bp: 'Blood pressure (bottom)',
+  waist_circumference: 'Waist', systolic_bp: 'Blood pressure (top)', diastolic_bp: 'Blood pressure (bottom)',
 };
 
 /** Latest result per test, with how many earlier results there are. */
@@ -108,7 +108,8 @@ export default function PersonScreen() {
         <Section title="Medicines">
           {meds.map((x, i) => (
             <Row key={x.id} title={x.name}
-                 detail={[x.dosage, x.prescribed_on ? `prescribed ${formatDay(x.prescribed_on)}` : null].filter(Boolean).join(' · ')}
+                 detail={[x.generic && !x.name.toLowerCase().includes(x.generic.split(' ')[0]) ? x.generic : null, x.dosage,
+                          x.prescribed_on ? `prescribed ${formatDay(x.prescribed_on)}` : null].filter(Boolean).join(' · ')}
                  onPress={() => remove(x.id, x.name)} last={i === meds.length - 1} />
           ))}
         </Section>
