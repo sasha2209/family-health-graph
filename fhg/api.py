@@ -1,6 +1,7 @@
 """HTTP API (FastAPI)."""
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -8,6 +9,7 @@ import logging
 import os
 import re
 import secrets
+import urllib.parse
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -15,11 +17,12 @@ from typing import Any, Optional
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from . import auth, clinic, inbound, partners, push, trends
 from .connectors import smart
+from . import partner_oauth as poauth
 from .clinician_report import render_html as clinician_report_html
 from .family_links import (
     compose,
@@ -34,7 +37,7 @@ from .ingest import CsvImportError, parse_family_csv, parse_family_history_text,
 from .insights import generate_insights, summarize
 from .merge import find_match, merge_into
 from .models import Condition, FamilyMember, HealthProfile, Medication, Observation, Relationship, Sex
-from .security import constant_time_equals, load_cipher, pseudonym
+from .security import constant_time_equals, hash_token, load_cipher, pseudonym
 from .sharing import CONSENT_AI_DOCS, CONSENT_LLM, CONSENT_RESEARCH, PARTNERS, deidentify, partner_payload, share_scope
 from .storage import Store
 from .terminology import CONCEPTS_BY_CATEGORY as _CONCEPTS, OBSERVATION_ALIASES, OBSERVATION_TO_LOINC, category_from_text
@@ -278,6 +281,26 @@ class PartnerIn(BaseModel):
     name: str = Field(..., min_length=2, max_length=120)
     kind: str = Field("other", pattern="^(" + "|".join(partners.PARTNER_KINDS) + ")$")
     webhook_url: Optional[str] = Field(None, max_length=500, pattern=r"^https?://\S+$")
+
+
+class PartnerOAuthIn(BaseModel):
+    redirect_uris: list[str] = Field(..., min_length=1, max_length=10)
+    confidential: bool = Field(False, description="Issue a client secret (server-side partners)")
+
+
+class OAuthApproveIn(BaseModel):
+    client_id: str
+    redirect_uri: str
+    scopes: list[str] = Field(..., min_length=1)
+    state: Optional[str] = Field(None, max_length=500)
+    code_challenge: str = Field(..., min_length=43, max_length=128)
+    code_challenge_method: str = "S256"
+
+
+class OAuthDenyIn(BaseModel):
+    client_id: str
+    redirect_uri: str
+    state: Optional[str] = Field(None, max_length=500)
 
 
 class PartnerStatusIn(BaseModel):
@@ -1308,6 +1331,206 @@ def create_app(settings: Optional[Settings] = None,
         if not store.set_partner_active(partner_id, False):
             raise HTTPException(404, "No such partner")
         return store.partner(partner_id)
+
+    # --- Connect with Family Health Graph: consented partner access (docs/FAMILY_HISTORY_API.md) ---
+    @app.put("/admin/partners/{partner_id}/oauth", dependencies=[Depends(require_admin)])
+    def admin_partner_oauth(partner_id: str, body: PartnerOAuthIn) -> dict:
+        if store.partner(partner_id) is None:
+            raise HTTPException(404, "No such partner")
+        for uri in body.redirect_uris:
+            parts = urllib.parse.urlsplit(uri)
+            local = parts.scheme == "http" and parts.hostname in ("localhost", "127.0.0.1")
+            if not (parts.scheme == "https" or local) or parts.fragment or not parts.netloc:
+                raise HTTPException(422, f"Redirect URIs must be https (or http://localhost for development): {uri}")
+        secret = store.set_partner_oauth(partner_id, body.redirect_uris, body.confidential)
+        return {"client_id": partner_id, "redirect_uris": body.redirect_uris, "client_secret": secret,
+                "note": "The client secret is shown once." if secret else "Public client: use PKCE without a secret."}
+
+    def oauth_client(client_id: str, redirect_uri: str) -> dict:
+        client = store.partner_oauth(client_id)
+        if client is None or redirect_uri not in client["redirect_uris"]:
+            raise HTTPException(400, "Unknown app or redirect address")
+        return client
+
+    def with_query(uri: str, **params) -> str:
+        params = {k: v for k, v in params.items() if v is not None}
+        return uri + ("&" if urllib.parse.urlsplit(uri).query else "?") + urllib.parse.urlencode(params)
+
+    @app.get("/.well-known/oauth-authorization-server", include_in_schema=False)
+    @app.get("/fhir/r4/.well-known/smart-configuration", include_in_schema=False)
+    def oauth_metadata(request: Request) -> dict:
+        base = public_base(request)
+        return {"issuer": base, "authorization_endpoint": f"{base}/oauth/authorize", "token_endpoint": f"{base}/oauth/token",
+                "scopes_supported": list(poauth.SCOPES), "response_types_supported": ["code"],
+                "grant_types_supported": ["authorization_code", "refresh_token"],
+                "code_challenge_methods_supported": ["S256"],
+                "token_endpoint_auth_methods_supported": ["none", "client_secret_post", "client_secret_basic"],
+                "capabilities": ["launch-standalone", "client-public", "client-confidential-symmetric"]}
+
+    @app.get("/oauth/authorize", include_in_schema=False)
+    def oauth_authorize(request: Request, client_id: str = Query(""), redirect_uri: str = Query(""),
+                        response_type: str = Query(""), scope: str = Query(""), state: Optional[str] = Query(None),
+                        code_challenge: str = Query(""), code_challenge_method: str = Query("")) -> Response:
+        """Validates the request, then hands over to the consent screen in the app (where the user is signed in)."""
+        client = store.partner_oauth(client_id)
+        if client is None or redirect_uri not in client["redirect_uris"]:
+            # Never redirect to an unregistered address.
+            return HTMLResponse(_connect_page("This app isn't registered with Family Health Graph, or its return "
+                                              "address doesn't match. Nothing was shared.", None), status_code=400)
+        known, unknown = poauth.parse_scopes(scope)
+        if response_type != "code":
+            return RedirectResponse(with_query(redirect_uri, error="unsupported_response_type", state=state), 302)
+        if unknown or not known:
+            return RedirectResponse(with_query(redirect_uri, error="invalid_scope", state=state), 302)
+        if code_challenge_method != "S256" or len(code_challenge) < 43:
+            return RedirectResponse(with_query(redirect_uri, error="invalid_request",
+                                               error_description="PKCE with S256 is required", state=state), 302)
+        return RedirectResponse("/app/authorize?" + str(request.url.query), 302)
+
+    @app.get("/v1/oauth/request")
+    def oauth_request(client_id: str, redirect_uri: str, scope: str = "", user_id: str = Depends(current_user)) -> dict:
+        """What the consent screen shows: who is asking, and for what."""
+        client = oauth_client(client_id, redirect_uri)
+        known, _ = poauth.parse_scopes(scope)
+        existing = next((g for g in store.grants_for_user(user_id) if g["partner_id"] == client_id), None)
+        return {"partner": {"id": client["id"], "name": client["name"], "kind": client["kind"]},
+                "scopes": [{"scope": s, "description": poauth.SCOPES[s]} for s in known],
+                "already_granted": existing["scopes"] if existing else [],
+                "expires_in_days": poauth.GRANT_DAYS}
+
+    @app.post("/v1/oauth/approve")
+    def oauth_approve(body: OAuthApproveIn, user_id: str = Depends(current_user)) -> dict:
+        client = oauth_client(body.client_id, body.redirect_uri)
+        known, unknown = poauth.parse_scopes(" ".join(body.scopes))
+        if unknown or not known or body.code_challenge_method != "S256":
+            raise HTTPException(422, "Invalid scopes or PKCE method")
+        grant_id = store.upsert_grant(user_id, client["id"], known, poauth.GRANT_DAYS)
+        code = secrets.token_urlsafe(32)
+        store.save_oauth_code(hash_token(code), grant_id, body.redirect_uri, body.code_challenge, poauth.CODE_MINUTES)
+        store.audit(user_id, "user", "partner.consent_granted", {"partner": client["name"], "scopes": known,
+                                                                  "grant_id": grant_id})
+        return {"redirect_to": with_query(body.redirect_uri, code=code, state=body.state)}
+
+    @app.post("/v1/oauth/deny")
+    def oauth_deny(body: OAuthDenyIn, user_id: str = Depends(current_user)) -> dict:
+        oauth_client(body.client_id, body.redirect_uri)
+        return {"redirect_to": with_query(body.redirect_uri, error="access_denied", state=body.state)}
+
+    def token_error(error: str, status: int = 400) -> JSONResponse:
+        return JSONResponse({"error": error}, status_code=status, headers={"Cache-Control": "no-store"})
+
+    def issue_tokens(grant: dict) -> JSONResponse:
+        access, refresh = "fhga_" + secrets.token_urlsafe(32), "fhgr_" + secrets.token_urlsafe(32)
+        store.save_oauth_token(hash_token(access), grant["id"], "access", poauth.ACCESS_TOKEN_SECONDS)
+        remaining = int((datetime.fromisoformat(grant["expires_at"]) - datetime.now(timezone.utc)).total_seconds())
+        store.save_oauth_token(hash_token(refresh), grant["id"], "refresh", max(remaining, 0))
+        return JSONResponse({"access_token": access, "token_type": "Bearer", "expires_in": poauth.ACCESS_TOKEN_SECONDS,
+                             "refresh_token": refresh, "scope": " ".join(grant["scopes"]),
+                             "patient": partner_patient_id(grant)},
+                            headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
+
+    def partner_patient_id(grant: dict) -> str:
+        # Different for every partner, so partners can't link users across each other.
+        return pseudonym(settings.pseudonym_secret, f"{grant['partner_id']}:{grant['user_id']}")
+
+    @app.post("/oauth/token", include_in_schema=False)
+    async def oauth_token(request: Request) -> JSONResponse:
+        form = {k: v[0] for k, v in urllib.parse.parse_qs((await request.body()).decode(errors="replace")).items()}
+        client_id, client_secret = form.get("client_id", ""), form.get("client_secret")
+        basic = request.headers.get("authorization", "")
+        if basic.lower().startswith("basic "):
+            try:
+                client_id, _, client_secret = base64.b64decode(basic[6:]).decode().partition(":")
+                client_id, client_secret = urllib.parse.unquote(client_id), urllib.parse.unquote(client_secret)
+            except ValueError:
+                return token_error("invalid_client", 401)
+        client = store.partner_oauth(client_id)
+        if client is None:
+            return token_error("invalid_client", 401)
+        if client["client_secret_hash"] and not (client_secret and
+                                                 hmac.compare_digest(hash_token(client_secret), client["client_secret_hash"])):
+            return token_error("invalid_client", 401)
+        grant_type = form.get("grant_type")
+        if grant_type == "authorization_code":
+            code = store.pop_oauth_code(hash_token(form.get("code", "")))
+            if code is None or code["redirect_uri"] != form.get("redirect_uri"):
+                return token_error("invalid_grant")
+            verifier = form.get("code_verifier", "")
+            challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode() \
+                if verifier else ""
+            grant = store.grant(code["grant_id"])
+            if not verifier or not hmac.compare_digest(challenge, code["code_challenge"]) or grant is None \
+                    or not grant["active"] or grant["partner_id"] != client_id:
+                return token_error("invalid_grant")
+            store.audit(grant["user_id"], f"partner:{client_id}", "partner.token_issued", {"partner": client["name"]})
+            return issue_tokens(grant)
+        if grant_type == "refresh_token":
+            old = hash_token(form.get("refresh_token", ""))
+            grant = store.oauth_token(old, "refresh")
+            if grant is None or grant["partner_id"] != client_id:
+                return token_error("invalid_grant")
+            store.delete_oauth_token(old)  # rotate refresh tokens
+            return issue_tokens(grant)
+        return token_error("unsupported_grant_type")
+
+    def partner_grant(authorization: Optional[str] = Header(None)) -> dict:
+        token = authorization[7:] if authorization and authorization.lower().startswith("bearer ") else ""
+        grant = store.oauth_token(hash_token(token), "access") if token else None
+        if grant is None:
+            raise HTTPException(401, "Missing, expired or revoked access token")
+        return grant
+
+    def fhir_json(body: dict, status: int = 200) -> JSONResponse:
+        return JSONResponse(body, status_code=status, media_type="application/fhir+json",
+                            headers={"Cache-Control": "no-store"})
+
+    @app.get("/fhir/r4/metadata", include_in_schema=False)
+    def fhir_metadata(request: Request) -> JSONResponse:
+        return fhir_json(poauth.capability_statement(f"{public_base(request)}/fhir/r4"))
+
+    def fhir_read(resource_type: str, grant: dict, request: Request, resource_id: Optional[str] = None) -> JSONResponse:
+        scope = poauth.RESOURCE_SCOPE.get(resource_type)
+        if scope is None:
+            return fhir_json(poauth.outcome("not-supported", f"{resource_type} isn't available"), 404)
+        if scope not in grant["scopes"]:
+            return fhir_json(poauth.outcome("forbidden", f"The user didn't share {scope}"), 403)
+        # The user's own record only: never what linked relatives shared with them.
+        profile = store.get_profile(grant["user_id"])
+        report = generate_insights(profile) if resource_type == "RiskAssessment" else None
+        pid = partner_patient_id(grant)
+        items = poauth.resources(resource_type, profile, report, pid)
+        store.touch_grant(grant["id"])
+        store.audit(grant["user_id"], f"partner:{grant['partner_id']}", "partner.read",
+                    {"partner": grant["partner_name"], "resource": resource_type, "count": len(items)})
+        if resource_id is not None:
+            match = next((r for r in items if r.get("id") == resource_id), None)
+            return fhir_json(match) if match else fhir_json(poauth.outcome("not-found", "No such resource"), 404)
+        return fhir_json(poauth.searchset(f"{public_base(request)}/fhir/r4", items))
+
+    @app.get("/fhir/r4/{resource_type}", include_in_schema=False)
+    def fhir_search(resource_type: str, request: Request, grant: dict = Depends(partner_grant)) -> JSONResponse:
+        return fhir_read(resource_type, grant, request)
+
+    @app.get("/fhir/r4/{resource_type}/{resource_id}", include_in_schema=False)
+    def fhir_instance(resource_type: str, resource_id: str, request: Request,
+                      grant: dict = Depends(partner_grant)) -> JSONResponse:
+        return fhir_read(resource_type, grant, request, resource_id)
+
+    @app.get("/v1/grants")
+    def list_grants(user_id: str = Depends(current_user)) -> list[dict]:
+        """Apps you've allowed to read your family history: what, since when, last used."""
+        return [{"id": g["id"], "partner": {"id": g["partner_id"], "name": g["partner_name"], "kind": g["partner_kind"]},
+                 "scopes": [{"scope": s, "description": poauth.SCOPES.get(s, s)} for s in g["scopes"]],
+                 "created_at": g["created_at"], "expires_at": g["expires_at"], "last_used_at": g["last_used_at"]}
+                for g in store.grants_for_user(user_id)]
+
+    @app.delete("/v1/grants/{grant_id}", status_code=204)
+    def revoke_grant(grant_id: str, user_id: str = Depends(current_user)) -> Response:
+        g = store.grant(grant_id)
+        if g is None or g["user_id"] != user_id or not store.revoke_grant(user_id, grant_id):
+            raise HTTPException(404, "No such app access")
+        store.audit(user_id, "user", "partner.consent_revoked", {"partner": g["partner_name"], "grant_id": grant_id})
+        return Response(status_code=204)
 
     @app.get("/v1/referrals")
     def my_referrals(user_id: str = Depends(current_user)) -> list[dict]:

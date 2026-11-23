@@ -245,3 +245,20 @@ export interface Connection {
   last_sync_at: string | null;
   last_sync_summary: { read: Record<string, number>; merged: Record<string, number> } | null;
 }
+
+// --- apps with access (Connect with Family Health Graph) ---------------------------------
+export interface ScopeInfo { scope: string; description: string }
+export interface OAuthRequestInfo {
+  partner: { id: string; name: string; kind: string };
+  scopes: ScopeInfo[];
+  already_granted: string[];
+  expires_in_days: number;
+}
+export interface Grant {
+  id: string;
+  partner: { id: string; name: string; kind: string };
+  scopes: ScopeInfo[];
+  created_at: string;
+  expires_at: string;
+  last_used_at: string | null;
+}
