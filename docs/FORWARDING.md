@@ -31,6 +31,26 @@ After that, any photo or PDF they send becomes a document for review. Replies ar
 health information. Phone numbers are stored as an HMAC (for lookup) and encrypted (for replies). A number can belong to one
 account only. Meta's rules for health messaging and opt-in apply; the user starts every conversation.
 
+## The WhatsApp assistant
+
+Once a number is linked, the assistant understands:
+
+| They send | It does |
+|---|---|
+| A photo or PDF | Reads it (on-server OCR in English and Hindi, rules, opt-in AI). Then it replies **1** = save to my record, **2** = my mother's, **3** = my father's. |
+| Family history as text, in English, **Hindi or Hinglish** (“mummy ko sugar hai, papa ko 52 mein heart attack hua”) | Kinship words (nani, dadi, chacha, mausi, bua…), condition words (sugar, BP, dil ka daura, lakwa…) and ages are understood. It asks for **1** to save. |
+| `HELP` · `SUMMARY` · `LANG hi/bn/ta/te/mr/en` · `STOP` | Options · action items · reply language · disconnect |
+| A voice note | Asks for text or a photo (voice is planned) |
+
+- **Languages:** replies are in English, Hindi, Bengali, Tamil, Telugu or Marathi. The language is picked from the
+  script the person writes in, or set with `LANG`. The non-English texts in `fhg/i18n.py` are drafts for
+  native-speaker review.
+- **Privacy:** health details (what was read, action items, the echo of typed history) are only sent when the person
+  turns on **WhatsApp summaries** in Settings (consent scope `whatsapp_summaries`). Otherwise replies are short
+  confirmations with no health information.
+- **OCR languages:** `FHG_OCR_LANGS` (default `eng+hin`, using installed packs only). Add `ben`, `tam`, `tel` or
+  `mar` and the matching `tesseract-ocr-*` packages where needed; each extra language slows OCR.
+
 ## API
 
 | | |

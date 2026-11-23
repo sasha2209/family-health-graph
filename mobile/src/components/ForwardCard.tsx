@@ -60,7 +60,8 @@ export function ForwardCard() {
           <Text style={[styles.label, { color: c.muted }]}>WhatsApp</Text>
           {data.whatsapp.linked ? (
             <>
-              <Body>Connected. Send photos or PDFs to {data.whatsapp.number}.</Body>
+              <Body>Connected. Send photos or PDFs to {data.whatsapp.number}, or type family history in English, Hindi or
+                Hinglish (“mummy ko sugar hai”). Reply 1 to save, HELP for options.</Body>
               <View style={styles.row}>
                 <Button title="Disconnect WhatsApp" variant="danger" disabled={busy}
                         onPress={() => run(async () => { await api.unlinkWhatsapp(); reload(); })} />

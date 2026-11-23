@@ -15,6 +15,7 @@ import { useLoader } from '../../lib/useLoader';
 
 const AI_SCOPE = 'ai_summary';
 const AI_DOCS_SCOPE = 'ai_document_reading';
+const WA_SCOPE = 'whatsapp_summaries';
 
 function confirmDestructive(title: string, message: string, onOk: () => void, okText = 'Delete') {
   if (Platform.OS === 'web') {
@@ -46,7 +47,8 @@ export default function SettingsScreen() {
       api.profile(false), api.consents(), api.me(), api.sessions(), api.pushStatus(), api.clinics(), api.grants()]);
     return { profile, me, sessions, clinics, grants, push: pushState.registered,
              ai: consents.consents.some((x) => x.scope === AI_SCOPE && x.active),
-             aiDocs: consents.consents.some((x) => x.scope === AI_DOCS_SCOPE && x.active) };
+             aiDocs: consents.consents.some((x) => x.scope === AI_DOCS_SCOPE && x.active),
+             wa: consents.consents.some((x) => x.scope === WA_SCOPE && x.active) };
   });
   const [birth, setBirth] = useState<string | null>(null);
   const [waist, setWaist] = useState('');
@@ -54,7 +56,7 @@ export default function SettingsScreen() {
   const [msg, setMsg] = useState<string | null>(null);
 
   if (!data) return <Screen>{error ? <ErrorText>{error}</ErrorText> : <Loading />}</Screen>;
-  const { profile, ai, aiDocs, me, sessions, push, clinics, grants } = data;
+  const { profile, ai, aiDocs, wa, me, sessions, push, clinics, grants } = data;
   const support = pushSupport();
   const birthValue = birth ?? profile.birth_date ?? '';
 
@@ -241,6 +243,21 @@ export default function SettingsScreen() {
             value={aiDocs}
             trackColor={{ true: c.accent, false: c.border }}
             onValueChange={async (v) => { await api.setConsent(AI_DOCS_SCOPE, v); reload(); }}
+          />
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 14 }}>
+          <View style={{ flex: 1 }}>
+            <Body>WhatsApp summaries</Body>
+            <Body muted style={{ fontSize: 13 }}>
+              Let the WhatsApp assistant tell you what it read and your action items. Off: it only sends short
+              confirmations, with no health details.
+            </Body>
+          </View>
+          <Switch
+            accessibilityLabel="WhatsApp summaries"
+            value={wa}
+            trackColor={{ true: c.accent, false: c.border }}
+            onValueChange={async (v) => { await api.setConsent(WA_SCOPE, v); reload(); }}
           />
         </View>
         <View style={styles.row}>
