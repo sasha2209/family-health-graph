@@ -230,6 +230,16 @@ CREATE TABLE IF NOT EXISTS bookings (
 );
 CREATE INDEX IF NOT EXISTS idx_bookings_user ON bookings(user_id);
 CREATE INDEX IF NOT EXISTS idx_bookings_partner ON bookings(partner_id, status);
+-- Risk figures a genetic counseling partner calculated (e.g. in CanRisk) and posted back. Encrypted.
+CREATE TABLE IF NOT EXISTS risk_results (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    partner_id TEXT NOT NULL REFERENCES partners(id),
+    referral_id TEXT,
+    data BLOB NOT NULL,               -- encrypted JSON {model, predictions[], note}
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_risk_results_user ON risk_results(user_id, created_at);
 CREATE TABLE IF NOT EXISTS nudges (
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     key TEXT NOT NULL,
@@ -605,6 +615,21 @@ class Store:
         rows = self._query("SELECT p.name AS partner, b.status, COUNT(*) AS n, SUM(COALESCE(b.price_inr, 0)) AS value_inr "
                            "FROM bookings b JOIN partners p ON p.id = b.partner_id GROUP BY p.name, b.status ORDER BY p.name")
         return [dict(r) for r in rows]
+
+    def add_risk_result(self, user_id: str, partner_id: str, referral_id: Optional[str], data: dict) -> str:
+        rid = uuid.uuid4().hex[:16]
+        with self._lock, self._conn:
+            self._conn.execute("INSERT INTO risk_results (id, user_id, partner_id, referral_id, data, created_at) "
+                               "VALUES (?, ?, ?, ?, ?, ?)",
+                               (rid, user_id, partner_id, referral_id, self._cipher.encrypt(json.dumps(data)), _now()))
+        return rid
+
+    def risk_results(self, user_id: str) -> list[dict]:
+        rows = self._query("SELECT r.*, p.name AS partner_name FROM risk_results r JOIN partners p ON p.id = r.partner_id "
+                           "WHERE r.user_id = ? ORDER BY r.created_at DESC", (user_id,))
+        return [{"id": r["id"], "partner_id": r["partner_id"], "partner_name": r["partner_name"],
+                 "referral_id": r["referral_id"], "created_at": r["created_at"],
+                 **json.loads(self._cipher.decrypt(r["data"]))} for r in rows]
 
     def nudges(self, user_id: str) -> list[dict]:
         return [dict(r) for r in self._query("SELECT key, sent_at FROM nudges WHERE user_id = ?", (user_id,))]

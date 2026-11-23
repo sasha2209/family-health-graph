@@ -603,10 +603,52 @@ def record_gaps(p: HealthProfile) -> Optional[Insight]:
     )
 
 
+# --- Lynch syndrome clinical criteria, computed on the family tree -------------------------------
+
+REF_AMSTERDAM = Reference(
+    title="Vasen et al. (1999): New clinical criteria for HNPCC (Lynch syndrome) proposed by the ICG-HNPCC",
+    url="https://pubmed.ncbi.nlm.nih.gov/10348829/",
+)
+REF_BETHESDA = Reference(
+    title="Umar et al. (2004): Revised Bethesda Guidelines for HNPCC (Lynch syndrome) and microsatellite instability",
+    url="https://pubmed.ncbi.nlm.nih.gov/14970275/",
+)
+
+
+def lynch_criteria(p: HealthProfile) -> Optional[Insight]:
+    from ..pedigree import build
+    from ..risk_models import amsterdam_ii, revised_bethesda
+    try:
+        ped = build(p)
+    except ValueError:
+        return None
+    ams, beth = amsterdam_ii(ped), revised_bethesda(ped)
+    if not ams.met and not beth:
+        return None
+    if ams.met:
+        summary = ("Your family meets the Amsterdam II criteria for Lynch syndrome: three or more relatives with "
+                   "Lynch-associated cancers across successive generations, one diagnosed before 50.")
+        evidence = ams.evidence
+    else:
+        summary = ("Someone in your family with colorectal cancer meets the revised Bethesda guidelines, which "
+                   "recommend testing their tumour (or genetic testing) for Lynch syndrome.")
+        evidence = [e for b in beth for e in b.criteria + b.evidence]
+    return Insight(
+        rule_id="lynch_criteria", category="cancer", level=Level.HIGH,
+        title="Family pattern meets Lynch syndrome criteria",
+        summary=summary, evidence=_dedupe(evidence)[:12],
+        recommendation=("Ask for genetic counseling. If a relative's colorectal or endometrial tumour can be tested "
+                        "for mismatch-repair deficiency, that is often the quickest first step. Confirmed Lynch "
+                        "syndrome means colonoscopy every 1-2 years, usually from age 20-25."),
+        references=[REF_AMSTERDAM, REF_BETHESDA, REF_NCCN],
+    )
+
+
 ALL_RULES: list[Rule] = [
     anesthesia_safety,
     hereditary_breast_ovarian,
     colorectal_family_history,
+    lynch_criteria,
     familial_hypercholesterolemia,
     premature_ascvd,
     diabetes_risk,
