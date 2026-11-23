@@ -28,7 +28,7 @@ class UnsupportedDocument(ValueError):
 @dataclass
 class TextResult:
     text: str
-    method: str  # "pdf_text" | "ocr" | "none"
+    method: str  # "pdf_text" | "ocr" | "fhir" | "none"
     pages: int = 1
     confidence: Optional[float] = None  # mean OCR word confidence 0-100; None for text PDFs
     images: list[bytes] = field(default_factory=list)  # page images (PNG), for an AI fallback
@@ -48,7 +48,7 @@ def sniff(data: bytes) -> str:
         return "image/tiff"
     if data[4:12] in (b"ftypheic", b"ftypheix", b"ftypmif1", b"ftyphevc"):
         raise UnsupportedDocument("HEIC photos aren't supported yet. Choose JPEG in your camera settings, or take the photo in the app.")
-    raise UnsupportedDocument("Upload a PDF or a photo (JPEG or PNG).")
+    raise UnsupportedDocument("Upload a PDF, a photo (JPEG or PNG), or a FHIR record file (.json).")
 
 
 def tesseract_available() -> bool:

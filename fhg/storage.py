@@ -211,6 +211,28 @@ CREATE TABLE IF NOT EXISTS documents (
     saved_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id, created_at);
+-- Connected record sources (SMART on FHIR portals, ABDM). Tokens are encrypted.
+CREATE TABLE IF NOT EXISTS connections (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,               -- smart | abdm
+    provider TEXT NOT NULL,           -- provider id (smart) or HIP name (abdm)
+    display_name TEXT NOT NULL,
+    secret BLOB,                      -- encrypted JSON: tokens, patient id, consent ids
+    status TEXT NOT NULL,             -- active | pending | revoked | error
+    last_sync_at TEXT,
+    last_sync_summary TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_connections_user ON connections(user_id);
+-- Short-lived state for an OAuth sign-in or consent request in progress.
+CREATE TABLE IF NOT EXISTS connect_states (
+    state_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    data BLOB NOT NULL,
+    expires_at TEXT NOT NULL
+);
 -- Forwarding channels: a private email address, and a linked WhatsApp number (stored as an HMAC for lookup
 -- and encrypted for replies).
 CREATE TABLE IF NOT EXISTS inbound_channels (
@@ -834,6 +856,73 @@ class Store:
         since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
         return self._query("SELECT COUNT(*) AS n FROM documents WHERE user_id = ? AND created_at > ?",
                            (user_id, since))[0]["n"]
+
+    # --- connected sources ------------------------------------------------------
+    def put_connect_state(self, state_hash: str, user_id: str, kind: str, data: dict, minutes: int = 15) -> None:
+        expires = (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat()
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM connect_states WHERE expires_at < ?", (_now(),))
+            self._conn.execute("INSERT INTO connect_states (state_hash, user_id, kind, data, expires_at) VALUES (?, ?, ?, ?, ?)",
+                               (state_hash, user_id, kind, self._cipher.encrypt(json.dumps(data)), expires))
+
+    def pop_connect_state(self, state_hash: str, kind: str) -> Optional[tuple[str, dict]]:
+        """Single use: the state is deleted as it's read."""
+        with self._lock, self._conn:
+            row = self._conn.execute("SELECT user_id, data FROM connect_states WHERE state_hash = ? AND kind = ? AND expires_at > ?",
+                                     (state_hash, kind, _now())).fetchone()
+            self._conn.execute("DELETE FROM connect_states WHERE state_hash = ?", (state_hash,))
+        return (row["user_id"], json.loads(self._cipher.decrypt(row["data"]))) if row else None
+
+    def create_connection(self, user_id: str, kind: str, provider: str, display_name: str, secret: dict,
+                          status: str = "active") -> str:
+        conn_id = uuid.uuid4().hex[:16]
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO connections (id, user_id, kind, provider, display_name, secret, status, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (conn_id, user_id, kind, provider, display_name, self._cipher.encrypt(json.dumps(secret)), status, _now()))
+        return conn_id
+
+    def connections(self, user_id: str) -> list[dict]:
+        rows = self._query("SELECT id, kind, provider, display_name, status, last_sync_at, last_sync_summary, created_at "
+                           "FROM connections WHERE user_id = ? AND status != 'revoked' ORDER BY created_at", (user_id,))
+        return [dict(r) | {"last_sync_summary": json.loads(r["last_sync_summary"]) if r["last_sync_summary"] else None}
+                for r in rows]
+
+    def connection(self, user_id: str, conn_id: str) -> Optional[dict]:
+        rows = self._query("SELECT * FROM connections WHERE id = ? AND user_id = ? AND status != 'revoked'", (conn_id, user_id))
+        if not rows:
+            return None
+        row = dict(rows[0])
+        row["secret"] = json.loads(self._cipher.decrypt(row["secret"])) if row["secret"] else {}
+        return row
+
+    def connection_by_secret_field(self, kind: str, key: str, value: str) -> Optional[tuple[str, str]]:
+        """(user_id, connection id) whose encrypted secret has secret[key] == value (e.g. an ABDM consent id)."""
+        for r in self._query("SELECT id, user_id, secret FROM connections WHERE kind = ? AND status != 'revoked'", (kind,)):
+            if r["secret"] and json.loads(self._cipher.decrypt(r["secret"])).get(key) == value:
+                return r["user_id"], r["id"]
+        return None
+
+    def update_connection(self, conn_id: str, *, secret: Optional[dict] = None, status: Optional[str] = None,
+                          sync_summary: Optional[dict] = None) -> None:
+        sets, params = [], []
+        if secret is not None:
+            sets.append("secret = ?"); params.append(self._cipher.encrypt(json.dumps(secret)))
+        if status is not None:
+            sets.append("status = ?"); params.append(status)
+        if sync_summary is not None:
+            sets += ["last_sync_at = ?", "last_sync_summary = ?"]; params += [_now(), json.dumps(sync_summary)]
+        if not sets:
+            return
+        with self._lock, self._conn:
+            self._conn.execute(f"UPDATE connections SET {', '.join(sets)} WHERE id = ?", (*params, conn_id))
+
+    def revoke_connection(self, user_id: str, conn_id: str) -> bool:
+        with self._lock, self._conn:
+            cur = self._conn.execute("UPDATE connections SET status = 'revoked', secret = NULL WHERE id = ? AND user_id = ? "
+                                     "AND status != 'revoked'", (conn_id, user_id))
+        return cur.rowcount > 0
 
     # --- forwarding channels ---------------------------------------------------
     def inbound(self, user_id: str) -> dict:

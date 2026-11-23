@@ -29,6 +29,7 @@ function RootStack() {
         <Stack.Screen name="document/[id]" options={{ title: 'Document' }} />
         <Stack.Screen name="person/[id]" options={{ title: 'Relative' }} />
         <Stack.Screen name="results" options={{ title: 'Your results' }} />
+        <Stack.Screen name="connections" options={{ title: 'Connected records' }} />
       </Stack.Protected>
       <Stack.Protected guard={!token} redirectTo="/">
         <Stack.Screen name="welcome" options={{ headerShown: false }} />

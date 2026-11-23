@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from .ai import AiResult, ai_extract, default_client
+from .fhir_doc import MEDIA_FHIR, attachments, extraction_from_fhir, looks_like_fhir
 from .models import DOC_TYPES, Extraction
 from .ocr import TextResult, UnsupportedDocument, extract_text, tesseract_available
 from .parse import parse_document
@@ -63,7 +64,31 @@ def _merge(rules: Extraction, ai: Extraction) -> Extraction:
     return out
 
 
+def _read_fhir(doc: dict, allow_ai: bool, client: Optional[object]) -> ReadResult:
+    try:
+        extraction, summary = extraction_from_fhir(doc)
+    except ValueError as exc:
+        raise UnsupportedDocument("This FHIR file couldn't be read.") from exc
+    result = ReadResult(MEDIA_FHIR, TextResult(summary, "fhir"), extraction)
+    if extraction.is_empty():
+        # A PDF-only record: read the embedded report like an uploaded one.
+        for _, blob in attachments(doc):
+            try:
+                inner = read_document(blob, allow_ai=allow_ai, client=client)
+            except UnsupportedDocument:
+                continue
+            inner.extraction.doc_type = extraction.doc_type if extraction.doc_type != "other" else inner.extraction.doc_type
+            inner.extraction.doc_date = extraction.doc_date or inner.extraction.doc_date
+            inner.media_type = MEDIA_FHIR
+            inner.text.text = summary + "\n\nAttached report:\n" + inner.text.text
+            return inner
+    return result
+
+
 def read_document(data: bytes, allow_ai: bool, client: Optional[object] = None) -> ReadResult:
+    fhir = looks_like_fhir(data)
+    if fhir is not None:
+        return _read_fhir(fhir, allow_ai, client)
     media_type, text = extract_text(data)
     rules = parse_document(text.text) if text.text else Extraction()
     result = ReadResult(media_type, text, rules)

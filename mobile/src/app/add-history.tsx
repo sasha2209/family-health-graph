@@ -46,6 +46,17 @@ export default function AddHistory() {
       <ForwardCard />
 
       <Card>
+        <H2>Records from hospitals</H2>
+        <Body muted>
+          Connect a hospital’s patient portal to import your records, or upload a health record file (.json) exported
+          from the ABHA app or a hospital. It goes through the same check before anything is saved.
+        </Body>
+        <View style={styles.row}>
+          <Button title="Connected records" onPress={() => router.push('/connections')} />
+        </View>
+      </Card>
+
+      <Card>
         <H2>Or describe it</H2>
         <Field
           label="Describe your family's health"

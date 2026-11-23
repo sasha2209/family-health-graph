@@ -186,7 +186,7 @@ export interface DocumentSummary {
   subject_member_id: string | null;
   filename: string | null;
   media_type: string;
-  method: 'pdf_text' | 'ocr' | 'none';
+  method: 'pdf_text' | 'ocr' | 'fhir' | 'none';
   ai_model: string | null;
   input_tokens: number;
   output_tokens: number;
@@ -233,4 +233,15 @@ export interface TrendTest {
   latest_band: { label: string; tone: Tone } | null;
   bands: { from: number | null; to: number | null; label: string; tone: Tone }[];
   bands_source: string | null;
+}
+
+// --- connected record sources ------------------------------------------------------------
+export interface Connection {
+  id: string;
+  kind: 'smart' | 'abdm';
+  provider: string;
+  display_name: string;
+  status: 'active' | 'pending' | 'error';
+  last_sync_at: string | null;
+  last_sync_summary: { read: Record<string, number>; merged: Record<string, number> } | null;
 }

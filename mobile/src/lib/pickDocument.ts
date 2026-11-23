@@ -37,7 +37,9 @@ export async function choosePhoto(): Promise<Picked | null> {
 
 export async function chooseFile(): Promise<Picked | null> {
   const result = await DocumentPicker.getDocumentAsync({
-    type: ['application/pdf', 'image/jpeg', 'image/png'], copyToCacheDirectory: true, multiple: false,
+    // JSON: FHIR record files exported from the ABHA app or a hospital.
+    type: ['application/pdf', 'image/jpeg', 'image/png', 'application/json', 'application/fhir+json'],
+    copyToCacheDirectory: true, multiple: false,
   });
   if (result.canceled || !result.assets[0]) return null;
   const a = result.assets[0];
