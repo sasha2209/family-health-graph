@@ -128,6 +128,7 @@ Design principles:
 | `GET /oauth/authorize` · `POST /oauth/token` · `GET /fhir/r4/{FamilyMemberHistory,RiskAssessment,…}` | **Connect with Family Health Graph**: partners read a person's family history with their consent (OAuth + PKCE, FHIR R4). See [docs/FAMILY_HISTORY_API.md](docs/FAMILY_HISTORY_API.md) |
 | `GET /v1/grants` · `DELETE /v1/grants/{id}` | Apps with access to your record; remove one |
 | `GET /v1/insights/{rule_id}/tests` · `POST /v1/bookings` · `GET /v1/bookings` · `…/cancel` · `…/done-elsewhere` | Book a test from an action item with a partner lab; results come back into the record. See [docs/TEST_BOOKING.md](docs/TEST_BOOKING.md) |
+| `GET /v1/risk` · `GET /v1/risk/canrisk` · `GET /v1/partner/referrals/{id}/canrisk` · `POST …/risk-assessment` | Lynch syndrome criteria computed on the family tree, a CanRisk (BOADICEA) pedigree export, and counselor risk figures back into the app. See [docs/RISK_MODELS.md](docs/RISK_MODELS.md) |
 | `GET/POST /v1/partner/bookings…` · `POST /admin/tasks/reminders` | Lab partners: bookings, status and FHIR results · daily follow-through reminders |
 | `PUT /v1/profile/lifestyle` | Physical activity and waist size, for the Indian Diabetes Risk Score |
 | `GET /v1/trends[?member_id=]` | Each test over time, placed in guideline ranges (BMI uses Asian cut-offs) |
