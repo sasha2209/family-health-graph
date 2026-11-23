@@ -12,6 +12,7 @@ import type {
   DocumentSaveBody,
   DocumentSummary,
   CreatedInvite,
+  Connection,
   FamilyLink,
   InboundInfo,
   TrendTest,
@@ -105,6 +106,13 @@ export function createApi(token: string | null) {
         { method: 'POST', body }),
     deleteDocument: (id: string) => authed<void>(`/v1/documents/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     ingestFhir: (bundle: unknown) => authed<IngestResult>('/v1/ingest/fhir', { method: 'POST', body: bundle }),
+    connections: () => authed<{ connections: Connection[]; available: { id: string; name: string; kind: string }[] }>(
+      '/v1/connections'),
+    connectSmart: (provider: string, returnTo?: string) =>
+      authed<{ authorize_url: string }>('/v1/connect/smart', { method: 'POST', body: { provider, return_to: returnTo } }),
+    syncConnection: (id: string) =>
+      authed<IngestResult>(`/v1/connections/${encodeURIComponent(id)}/sync`, { method: 'POST' }),
+    deleteConnection: (id: string) => authed<void>(`/v1/connections/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     inbound: () => authed<InboundInfo>('/v1/inbound'),
     rotateInboundEmail: () => authed<InboundInfo>('/v1/inbound/email/rotate', { method: 'POST' }),
     whatsappCode: () => authed<{ code: string; message: string; number: string; expires_in_minutes: number }>(

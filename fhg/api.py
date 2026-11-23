@@ -1,11 +1,13 @@
 """HTTP API (FastAPI)."""
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import logging
 import os
 import re
+import secrets
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -17,6 +19,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from . import auth, clinic, inbound, partners, push, trends
+from .connectors import smart
 from .clinician_report import render_html as clinician_report_html
 from .family_links import (
     compose,
@@ -74,6 +77,8 @@ class Settings:
     whatsapp_app_secret: Optional[str] = None
     whatsapp_access_token: Optional[str] = None
     whatsapp_phone_number_id: Optional[str] = None
+    # Patient portals people can connect (docs/CONNECTIONS.md): JSON list of {id, name, iss, client_id}.
+    smart_providers: Optional[str] = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -97,10 +102,19 @@ class Settings:
             whatsapp_app_secret=os.environ.get("FHG_WHATSAPP_APP_SECRET") or None,
             whatsapp_access_token=os.environ.get("FHG_WHATSAPP_ACCESS_TOKEN") or None,
             whatsapp_phone_number_id=os.environ.get("FHG_WHATSAPP_PHONE_NUMBER_ID") or None,
+            smart_providers=os.environ.get("FHG_SMART_PROVIDERS") or None,
             ios_app_ids=_csv("FHG_IOS_APP_IDS"),
             android_package=os.environ.get("FHG_ANDROID_PACKAGE") or None,
             android_cert_sha256=_csv("FHG_ANDROID_CERT_SHA256"),
         )
+
+
+def _connect_page(message: str, back: Optional[str]) -> str:
+    import html as _html
+    link = f'<p><a href="{_html.escape(back)}">Return to the app</a></p>' if back else ""
+    return ("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+            "<title>Family Health Graph</title><body style='font:16px system-ui;max-width:32rem;margin:3rem auto;padding:0 1rem'>"
+            f"<h1 style='font-size:20px'>Family Health Graph</h1><p>{_html.escape(message)}</p>{link}</body>")
 
 
 def _csv(name: str) -> tuple[str, ...]:
@@ -187,6 +201,11 @@ class DocumentSaveIn(BaseModel):
     medications: list[DocMedicationIn] = Field(default_factory=list)
     observations: list[DocObservationIn] = Field(default_factory=list)
     family: list[DocRelativeIn] = Field(default_factory=list)
+
+
+class SmartStartIn(BaseModel):
+    provider: str
+    return_to: Optional[str] = Field(None, description="App path to return to afterwards, e.g. /app/connections")
 
 
 class ConsentIn(BaseModel):
@@ -282,7 +301,8 @@ def create_app(settings: Optional[Settings] = None,
                webhook_sender: Optional[partners.WebhookSender] = None,
                webhooks_in_background: bool = True,
                document_ai_client: Optional[object] = None,
-               whatsapp_client: Optional[inbound.WhatsAppClient] = None) -> FastAPI:
+               whatsapp_client: Optional[inbound.WhatsAppClient] = None,
+               smart_http: Optional[smart.Http] = None) -> FastAPI:
     settings = settings or Settings.from_env()
     email_sender = email_sender or auth.email_sender_from_env()
     if settings.auth_secret == Settings.auth_secret:
@@ -924,6 +944,113 @@ def create_app(settings: Optional[Settings] = None,
         for msg in messages:
             background.add_task(handle_whatsapp, msg)
         return {"received": len(messages)}
+
+    # --- connected record sources: SMART on FHIR patient portals ----------------------------
+    smart_providers = smart.providers_from_env(settings.smart_providers)
+    fhir_http = smart_http or smart.UrllibHttp()
+
+    def state_hash(state: str) -> str:
+        return hashlib.sha256(state.encode()).hexdigest()
+
+    def smart_redirect_uri(request: Request) -> str:
+        return f"{public_base(request)}/connect/smart/callback"
+
+    @app.get("/v1/connections")
+    def list_connections(user_id: str = Depends(current_user)) -> dict:
+        """Connected sources, and the patient portals this server can connect to."""
+        return {"connections": store.connections(user_id),
+                "available": [{"id": p.id, "name": p.name, "kind": "smart"} for p in smart_providers.values()]}
+
+    @app.post("/v1/connect/smart")
+    def start_smart(body: SmartStartIn, request: Request, user_id: str = Depends(current_user)) -> dict:
+        """Start signing in to a patient portal. Open `authorize_url` in a browser."""
+        provider = smart_providers.get(body.provider)
+        if provider is None:
+            raise HTTPException(404, "Unknown provider")
+        try:
+            conf = smart.discover(fhir_http, provider.iss)
+        except smart.SmartError as exc:
+            raise HTTPException(502, str(exc)) from exc
+        state, (verifier, challenge) = secrets.token_urlsafe(24), smart.pkce_pair()
+        return_to = body.return_to if body.return_to and body.return_to.startswith("/") and \
+            not body.return_to.startswith("//") else "/app/connections"
+        store.put_connect_state(state_hash(state), user_id, "smart", {
+            "provider": provider.id, "verifier": verifier, "return_to": return_to})
+        store.audit(user_id, "user", "connection.started", {"provider": provider.id})
+        return {"authorize_url": smart.authorize_url(conf, provider, smart_redirect_uri(request), state, challenge)}
+
+    def smart_sync(user_id: str, conn: dict) -> dict:
+        provider = smart_providers.get(conn["provider"])
+        if provider is None:
+            raise HTTPException(409, "This portal is no longer available on this server")
+        secret = conn["secret"]
+        try:
+            conf = smart.discover(fhir_http, provider.iss)
+            token = secret.get("access_token")
+            expired = datetime.fromisoformat(secret.get("expires_at", "1970-01-01T00:00:00+00:00")) <= datetime.now(timezone.utc)
+            if expired:
+                if not secret.get("refresh_token"):
+                    store.update_connection(conn["id"], status="error")
+                    raise HTTPException(409, "Sign in to this portal again to sync.")
+                tok = smart.refresh(fhir_http, conf, provider, secret["refresh_token"])
+                secret |= {"access_token": tok["access_token"], "refresh_token": tok.get("refresh_token", secret["refresh_token"]),
+                           "expires_at": (datetime.now(timezone.utc) + timedelta(seconds=int(tok.get("expires_in", 3600)))).isoformat()}
+                token = tok["access_token"]
+                store.update_connection(conn["id"], secret=secret)
+            pull = smart.fetch_patient_bundle(fhir_http, provider.iss, token, secret["patient"])
+        except smart.SmartError as exc:
+            store.update_connection(conn["id"], status="error")
+            raise HTTPException(502, str(exc)) from exc
+        fragment = parse_fhir(pull.bundle, source=f"smart:{conn['id']}")
+        result = ingest(user_id, "smart", json.dumps({"connection": conn["id"], "counts": pull.counts}), fragment, preview=False)
+        store.update_connection(conn["id"], status="active", sync_summary={"read": pull.counts, "merged": result["merged"]})
+        return result
+
+    @app.get("/connect/smart/callback", response_class=HTMLResponse, include_in_schema=False)
+    def smart_callback(request: Request, state: str = Query(""), code: str = Query(""),
+                       error: str = Query("")) -> HTMLResponse:
+        pending = store.pop_connect_state(state_hash(state), "smart") if state else None
+        if pending is None:
+            return HTMLResponse(_connect_page("This sign-in link has expired. Start again from the app.", None), status_code=400)
+        user_id, data = pending
+        back = data.get("return_to", "/app/connections")
+        if error or not code:
+            return HTMLResponse(_connect_page("The connection was cancelled. Nothing was imported.", back))
+        provider = smart_providers.get(data["provider"])
+        try:
+            conf = smart.discover(fhir_http, provider.iss)
+            tok = smart.exchange_code(fhir_http, conf, provider, code, smart_redirect_uri(request), data["verifier"])
+        except smart.SmartError as exc:
+            return HTMLResponse(_connect_page(str(exc), back), status_code=502)
+        conn_id = store.create_connection(user_id, "smart", provider.id, provider.name, {
+            "patient": tok["patient"], "access_token": tok["access_token"], "refresh_token": tok.get("refresh_token"),
+            "expires_at": (datetime.now(timezone.utc) + timedelta(seconds=int(tok.get("expires_in", 3600)))).isoformat()})
+        store.audit(user_id, "user", "connection.created", {"connection_id": conn_id, "provider": provider.id})
+        try:
+            result = smart_sync(user_id, store.connection(user_id, conn_id))
+            m = result["merged"]
+            msg = (f"Connected to {provider.name}. Added {m['conditions']} diagnoses, {m['medications']} medicines, "
+                   f"{m['observations']} test results and {m['relatives_added']} relatives.")
+        except HTTPException as exc:
+            msg = f"Connected to {provider.name}, but the first import failed: {exc.detail} Try “Sync now” in the app."
+        return HTMLResponse(_connect_page(msg, back))
+
+    @app.post("/v1/connections/{conn_id}/sync")
+    def sync_connection(conn_id: str, user_id: str = Depends(current_user)) -> dict:
+        conn = store.connection(user_id, conn_id)
+        if conn is None:
+            raise HTTPException(404, "No such connection")
+        if conn["kind"] != "smart":
+            raise HTTPException(409, "This connection syncs automatically")
+        return smart_sync(user_id, conn)
+
+    @app.delete("/v1/connections/{conn_id}", status_code=204)
+    def delete_connection(conn_id: str, user_id: str = Depends(current_user)) -> Response:
+        """Disconnect: tokens are deleted. Records already imported stay (delete them individually)."""
+        if not store.revoke_connection(user_id, conn_id):
+            raise HTTPException(404, "No such connection")
+        store.audit(user_id, "user", "connection.revoked", {"connection_id": conn_id})
+        return Response(status_code=204)
 
     # --- results over time -----------------------------------------------------------------
     @app.get("/v1/trends")

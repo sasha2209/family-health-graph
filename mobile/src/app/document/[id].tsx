@@ -29,7 +29,8 @@ function allKeys(e: DocExtraction): Set<string> {
 }
 
 function HowRead({ doc }: { doc: DocumentDetail }) {
-  const how = doc.method === 'pdf_text' ? 'Read from the PDF’s text' : doc.method === 'ocr' ? 'Read from the image on our server' : 'No text found';
+  const how = doc.method === 'pdf_text' ? 'Read from the PDF’s text' : doc.method === 'ocr' ? 'Read from the image on our server'
+    : doc.method === 'fhir' ? 'Read from a health record file' : 'No text found';
   const ai = doc.ai_used
     ? ` · AI helped (${(doc.input_tokens + doc.output_tokens).toLocaleString()} tokens)`
     : ' · no AI used';
