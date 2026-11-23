@@ -104,7 +104,7 @@ This builds on the partner API (referrals, built) and adds a **consented family-
 | **1** | ✅ **Document upload with on-server OCR, AI fallback and review** and ✅ **managed family profiles** (each relative's diagnoses, medicines and results, built from their documents) | Covers the most journeys with no partnerships, and gives users an instant payoff |
 | **2** | ✅ Email / WhatsApp forwarding; ✅ lab value trends; ✅ provenance labels (see `FORWARDING.md`, `DATA_SOURCES.md`) | Ingestion with zero effort for the user; repeat engagement |
 | **3** | ✅ SMART on FHIR patient portals (US); ✅ ABDM / FHIR record-file import (India); ABDM HIU consent flow next (needs sandbox + certification, see `CONNECTIONS.md`) | Standards-based records at scale (needs sandbox access and certification) |
-| **4** | Partner family-history API (OAuth, consent artefacts, FHIR `FamilyMemberHistory` / `RiskAssessment`) | Turns the graph into a platform partners pay for |
+| **4** | ✅ Partner family-history API (OAuth + PKCE, consent artefacts, FHIR `FamilyMemberHistory` / `RiskAssessment`; see `FAMILY_HISTORY_API.md`) | Turns the graph into a platform partners pay for |
 
 ## 7. Decisions
 

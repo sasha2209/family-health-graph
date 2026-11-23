@@ -42,9 +42,9 @@ export default function SettingsScreen() {
   const { api, signOut } = useSession();
   const lock = useAppLock();
   const { data, error, reload } = useLoader(async () => {
-    const [profile, consents, me, sessions, pushState, clinics] = await Promise.all([
-      api.profile(false), api.consents(), api.me(), api.sessions(), api.pushStatus(), api.clinics()]);
-    return { profile, me, sessions, clinics, push: pushState.registered,
+    const [profile, consents, me, sessions, pushState, clinics, grants] = await Promise.all([
+      api.profile(false), api.consents(), api.me(), api.sessions(), api.pushStatus(), api.clinics(), api.grants()]);
+    return { profile, me, sessions, clinics, grants, push: pushState.registered,
              ai: consents.consents.some((x) => x.scope === AI_SCOPE && x.active),
              aiDocs: consents.consents.some((x) => x.scope === AI_DOCS_SCOPE && x.active) };
   });
@@ -52,7 +52,7 @@ export default function SettingsScreen() {
   const [msg, setMsg] = useState<string | null>(null);
 
   if (!data) return <Screen>{error ? <ErrorText>{error}</ErrorText> : <Loading />}</Screen>;
-  const { profile, ai, aiDocs, me, sessions, push, clinics } = data;
+  const { profile, ai, aiDocs, me, sessions, push, clinics, grants } = data;
   const support = pushSupport();
   const birthValue = birth ?? profile.birth_date ?? '';
 
@@ -164,6 +164,26 @@ export default function SettingsScreen() {
           }} />
         </View>
         {msg && <Body muted style={{ marginTop: 6 }}>{msg}</Body>}
+      </Card>
+
+      <Card>
+        <H2>Apps with access</H2>
+        {grants.length === 0 ? (
+          <Body muted>No apps can read your record. When a service asks to connect, you choose what it can see.</Body>
+        ) : grants.map((g) => (
+          <View key={g.id} style={{ marginTop: 12, gap: 4 }}>
+            <Body style={{ fontWeight: '600' }}>{g.partner.name}</Body>
+            <Body muted style={{ fontSize: 13 }}>
+              Can read: {g.scopes.map((x) => x.scope.replace('.read', '').replace('_', ' ')).join(', ')}
+              {' · '}{g.last_used_at ? `last read ${new Date(g.last_used_at).toLocaleDateString()}` : 'not used yet'}
+            </Body>
+            <View style={styles.row}>
+              <Button title="Remove access" variant="danger" onPress={() => confirmDestructive(
+                `Remove ${g.partner.name}’s access?`, 'They will no longer be able to read your record.',
+                async () => { await api.revokeGrant(g.id); reload(); }, 'Remove')} />
+            </View>
+          </View>
+        ))}
       </Card>
 
       <Card>

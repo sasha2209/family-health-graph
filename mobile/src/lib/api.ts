@@ -13,6 +13,8 @@ import type {
   DocumentSummary,
   CreatedInvite,
   Connection,
+  Grant,
+  OAuthRequestInfo,
   FamilyLink,
   InboundInfo,
   TrendTest,
@@ -113,6 +115,15 @@ export function createApi(token: string | null) {
     syncConnection: (id: string) =>
       authed<IngestResult>(`/v1/connections/${encodeURIComponent(id)}/sync`, { method: 'POST' }),
     deleteConnection: (id: string) => authed<void>(`/v1/connections/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    oauthRequest: (q: { client_id: string; redirect_uri: string; scope: string }) =>
+      authed<OAuthRequestInfo>(`/v1/oauth/request?${new URLSearchParams(q).toString()}`),
+    oauthApprove: (body: { client_id: string; redirect_uri: string; scopes: string[]; state?: string;
+                           code_challenge: string; code_challenge_method: string }) =>
+      authed<{ redirect_to: string }>('/v1/oauth/approve', { method: 'POST', body }),
+    oauthDeny: (body: { client_id: string; redirect_uri: string; state?: string }) =>
+      authed<{ redirect_to: string }>('/v1/oauth/deny', { method: 'POST', body }),
+    grants: () => authed<Grant[]>('/v1/grants'),
+    revokeGrant: (id: string) => authed<void>(`/v1/grants/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     inbound: () => authed<InboundInfo>('/v1/inbound'),
     rotateInboundEmail: () => authed<InboundInfo>('/v1/inbound/email/rotate', { method: 'POST' }),
     whatsappCode: () => authed<{ code: string; message: string; number: string; expires_in_minutes: number }>(

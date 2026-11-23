@@ -211,6 +211,31 @@ CREATE TABLE IF NOT EXISTS documents (
     saved_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id, created_at);
+-- Connect with Family Health Graph: OAuth for partners. A grant is the user's consent artefact.
+CREATE TABLE IF NOT EXISTS oauth_grants (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    partner_id TEXT NOT NULL REFERENCES partners(id),
+    scopes TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT,
+    last_used_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_grants_user ON oauth_grants(user_id);
+CREATE TABLE IF NOT EXISTS oauth_codes (
+    code_hash TEXT PRIMARY KEY,
+    grant_id TEXT NOT NULL REFERENCES oauth_grants(id) ON DELETE CASCADE,
+    redirect_uri TEXT NOT NULL,
+    code_challenge TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS oauth_tokens (
+    token_hash TEXT PRIMARY KEY,
+    grant_id TEXT NOT NULL REFERENCES oauth_grants(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,               -- access | refresh
+    expires_at TEXT NOT NULL
+);
 -- Connected record sources (SMART on FHIR portals, ABDM). Tokens are encrypted.
 CREATE TABLE IF NOT EXISTS connections (
     id TEXT PRIMARY KEY,
@@ -268,6 +293,8 @@ class Store:
         self._add_column_if_missing("referrals", "partner_id", "TEXT REFERENCES partners(id)")
         self._add_column_if_missing("documents", "subject_member_id", "TEXT")
         self._add_column_if_missing("documents", "source", "TEXT NOT NULL DEFAULT 'upload'")
+        self._add_column_if_missing("partners", "redirect_uris", "TEXT")
+        self._add_column_if_missing("partners", "client_secret_hash", "TEXT")
 
     def _add_column_if_missing(self, table: str, column: str, decl: str) -> None:
         cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
@@ -487,6 +514,98 @@ class Store:
     def partner_for_key(self, api_key: str) -> Optional[dict]:
         rows = self._query("SELECT id FROM partners WHERE api_key_hash = ? AND active = 1", (hash_token(api_key),))
         return self.partner(rows[0]["id"]) if rows else None
+
+    def set_partner_oauth(self, partner_id: str, redirect_uris: list[str], confidential: bool) -> Optional[str]:
+        """Register OAuth redirect URIs; returns a new client secret for confidential clients (shown once)."""
+        secret = ("fhgcs_" + new_token()) if confidential else None
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE partners SET redirect_uris = ?, client_secret_hash = ? WHERE id = ?",
+                               (json.dumps(redirect_uris), hash_token(secret) if secret else None, partner_id))
+        return secret
+
+    def partner_oauth(self, partner_id: str) -> Optional[dict]:
+        rows = self._query("SELECT id, name, kind, active, redirect_uris, client_secret_hash FROM partners WHERE id = ?",
+                           (partner_id,))
+        if not rows or not rows[0]["active"] or not rows[0]["redirect_uris"]:
+            return None
+        r = rows[0]
+        return {"id": r["id"], "name": r["name"], "kind": r["kind"], "redirect_uris": json.loads(r["redirect_uris"]),
+                "client_secret_hash": r["client_secret_hash"]}
+
+    # --- OAuth grants (consent artefacts) -------------------------------------
+    def upsert_grant(self, user_id: str, partner_id: str, scopes: list[str], days: int) -> str:
+        """One active grant per user and partner; approving again replaces its scopes and expiry."""
+        now = datetime.now(timezone.utc)
+        expires = (now + timedelta(days=days)).isoformat()
+        with self._lock, self._conn:
+            row = self._conn.execute("SELECT id FROM oauth_grants WHERE user_id = ? AND partner_id = ? AND revoked_at IS NULL "
+                                     "AND expires_at > ?", (user_id, partner_id, now.isoformat())).fetchone()
+            if row:
+                self._conn.execute("UPDATE oauth_grants SET scopes = ?, expires_at = ? WHERE id = ?",
+                                   (json.dumps(scopes), expires, row["id"]))
+                return row["id"]
+            grant_id = uuid.uuid4().hex[:16]
+            self._conn.execute("INSERT INTO oauth_grants (id, user_id, partner_id, scopes, created_at, expires_at) "
+                               "VALUES (?, ?, ?, ?, ?, ?)", (grant_id, user_id, partner_id, json.dumps(scopes), now.isoformat(), expires))
+            return grant_id
+
+    def grant(self, grant_id: str) -> Optional[dict]:
+        rows = self._query("SELECT g.*, p.name AS partner_name, p.kind AS partner_kind, p.active AS partner_active "
+                           "FROM oauth_grants g JOIN partners p ON p.id = g.partner_id WHERE g.id = ?", (grant_id,))
+        if not rows:
+            return None
+        g = dict(rows[0])
+        g["scopes"] = json.loads(g["scopes"])
+        g["active"] = bool(g["partner_active"]) and g["revoked_at"] is None and g["expires_at"] > _now()
+        return g
+
+    def grants_for_user(self, user_id: str) -> list[dict]:
+        rows = self._query("SELECT id FROM oauth_grants WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ? "
+                           "ORDER BY created_at", (user_id, _now()))
+        return [self.grant(r["id"]) for r in rows]
+
+    def revoke_grant(self, user_id: str, grant_id: str) -> bool:
+        with self._lock, self._conn:
+            n = self._conn.execute("UPDATE oauth_grants SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL",
+                                   (_now(), grant_id, user_id)).rowcount
+            self._conn.execute("DELETE FROM oauth_tokens WHERE grant_id = ?", (grant_id,))
+        return n == 1
+
+    def touch_grant(self, grant_id: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE oauth_grants SET last_used_at = ? WHERE id = ?", (_now(), grant_id))
+
+    def save_oauth_code(self, code_hash: str, grant_id: str, redirect_uri: str, challenge: str, minutes: int) -> None:
+        expires = (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat()
+        with self._lock, self._conn:
+            self._conn.execute("INSERT INTO oauth_codes (code_hash, grant_id, redirect_uri, code_challenge, expires_at) "
+                               "VALUES (?, ?, ?, ?, ?)", (code_hash, grant_id, redirect_uri, challenge, expires))
+
+    def pop_oauth_code(self, code_hash: str) -> Optional[dict]:
+        """Single use; expired codes are never returned."""
+        with self._lock, self._conn:
+            row = self._conn.execute("SELECT * FROM oauth_codes WHERE code_hash = ? AND expires_at > ?",
+                                     (code_hash, _now())).fetchone()
+            self._conn.execute("DELETE FROM oauth_codes WHERE code_hash = ? OR expires_at <= ?", (code_hash, _now()))
+        return dict(row) if row else None
+
+    def save_oauth_token(self, token_hash: str, grant_id: str, kind: str, seconds: int) -> None:
+        expires = (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
+        with self._lock, self._conn:
+            self._conn.execute("INSERT INTO oauth_tokens (token_hash, grant_id, kind, expires_at) VALUES (?, ?, ?, ?)",
+                               (token_hash, grant_id, kind, expires))
+
+    def oauth_token(self, token_hash: str, kind: str) -> Optional[dict]:
+        rows = self._query("SELECT grant_id FROM oauth_tokens WHERE token_hash = ? AND kind = ? AND expires_at > ?",
+                           (token_hash, kind, _now()))
+        if not rows:
+            return None
+        g = self.grant(rows[0]["grant_id"])
+        return g if g and g["active"] else None
+
+    def delete_oauth_token(self, token_hash: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM oauth_tokens WHERE token_hash = ?", (token_hash,))
 
     def partner_webhook_secret(self, partner_id: str) -> Optional[str]:
         rows = self._query("SELECT webhook_secret FROM partners WHERE id = ?", (partner_id,))
