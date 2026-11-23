@@ -13,6 +13,8 @@ import type {
   DocumentSummary,
   CreatedInvite,
   FamilyLink,
+  InboundInfo,
+  TrendTest,
   FamilyMemberDetail,
   IngestResult,
   InsightReport,
@@ -103,6 +105,13 @@ export function createApi(token: string | null) {
         { method: 'POST', body }),
     deleteDocument: (id: string) => authed<void>(`/v1/documents/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     ingestFhir: (bundle: unknown) => authed<IngestResult>('/v1/ingest/fhir', { method: 'POST', body: bundle }),
+    inbound: () => authed<InboundInfo>('/v1/inbound'),
+    rotateInboundEmail: () => authed<InboundInfo>('/v1/inbound/email/rotate', { method: 'POST' }),
+    whatsappCode: () => authed<{ code: string; message: string; number: string; expires_in_minutes: number }>(
+      '/v1/inbound/whatsapp/code', { method: 'POST' }),
+    unlinkWhatsapp: () => authed<void>('/v1/inbound/whatsapp', { method: 'DELETE' }),
+    trends: (memberId?: string) =>
+      authed<{ tests: TrendTest[] }>(`/v1/trends${memberId ? `?member_id=${encodeURIComponent(memberId)}` : ''}`),
     familyMember: (id: string) => authed<FamilyMemberDetail>(`/v1/family/${encodeURIComponent(id)}`),
     updateFamilyMember: (id: string, body: { name?: string | null; age?: number | null; deceased?: boolean | null }) =>
       authed<FamilyMemberDetail>(`/v1/family/${encodeURIComponent(id)}`, { method: 'PATCH', body }),

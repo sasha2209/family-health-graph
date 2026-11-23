@@ -28,6 +28,7 @@ function RootStack() {
         <Stack.Screen name="add-history" options={{ title: 'Add health information', presentation: 'modal' }} />
         <Stack.Screen name="document/[id]" options={{ title: 'Document' }} />
         <Stack.Screen name="person/[id]" options={{ title: 'Relative' }} />
+        <Stack.Screen name="results" options={{ title: 'Your results' }} />
       </Stack.Protected>
       <Stack.Protected guard={!token} redirectTo="/">
         <Stack.Screen name="welcome" options={{ headerShown: false }} />

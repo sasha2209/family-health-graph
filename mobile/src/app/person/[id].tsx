@@ -5,7 +5,7 @@ import { Alert, Platform, Pressable, Text, View } from 'react-native';
 import { Row, Section } from '../../components/list';
 import { ScanCard } from '../../components/ScanCard';
 import { Body, Button, Card, ErrorText, Field, Loading, Screen, styles } from '../../components/ui';
-import { capitalize, DOC_TYPE_LABEL, formatDay, label } from '../../lib/format';
+import { capitalize, DOC_TYPE_LABEL, formatDay, label, sourceLabel } from '../../lib/format';
 import { useSession } from '../../lib/session';
 import { usePalette } from '../../lib/theme';
 import type { Observation } from '../../lib/types';
@@ -98,7 +98,8 @@ export default function PersonScreen() {
         {m.conditions.length === 0 && <View style={{ padding: 16 }}><Body muted>None recorded yet.</Body></View>}
         {m.conditions.map((x, i) => (
           <Row key={x.id} title={x.name}
-               detail={x.onset_age != null ? `Diagnosed at ${x.age_estimated ? 'about ' : ''}${x.onset_age}` : undefined}
+               detail={[x.onset_age != null ? `Diagnosed at ${x.age_estimated ? 'about ' : ''}${x.onset_age}` : null,
+                        sourceLabel(x.source)].filter(Boolean).join(' · ') || undefined}
                last={i === m.conditions.length - 1} />
         ))}
       </Section>
@@ -117,7 +118,10 @@ export default function PersonScreen() {
       )}
 
       {results.length > 0 && (
-        <Section title="Test results">
+        <Section title="Test results" right={
+          <Pressable accessibilityRole="link" onPress={() => router.push({ pathname: '/results', params: { member: m.id, who: m.relationship } })}>
+            <Text style={{ color: c.accent, fontSize: 14 }}>Over time ›</Text>
+          </Pressable>}>
           {results.map(({ o, earlier }, i) => (
             <Row key={o.id} title={`${OBS_LABEL[o.code] ?? label(o.code)}: ${o.value} ${o.unit}`.trim()}
                  detail={`${formatDay(o.effective_date)}${earlier.length

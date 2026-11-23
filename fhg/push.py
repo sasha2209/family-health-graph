@@ -28,6 +28,7 @@ PUSH_TEXT = {
     "family_cascade": "A relative shared a health update that may affect you.",
     "invitation_accepted": "A relative accepted your invitation.",
     "referral": "Your care team updated a referral for you.",
+    "documents_received": "Your forwarded documents are ready to review.",
 }
 DEFAULT_TEXT = "You have a new update."
 

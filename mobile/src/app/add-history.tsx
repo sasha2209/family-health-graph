@@ -3,10 +3,11 @@ import { useState } from 'react';
 import { View } from 'react-native';
 
 import { Row, Section } from '../components/list';
+import { ForwardCard } from '../components/ForwardCard';
 import { ScanCard } from '../components/ScanCard';
 import { Body, Button, Card, ErrorText, Field, H2, Screen, styles } from '../components/ui';
 import { publicApi } from '../lib/api';
-import { capitalize, DOC_TYPE_LABEL, formatDay, label } from '../lib/format';
+import { capitalize, DOC_TYPE_LABEL, formatDay, label, VIA_LABEL } from '../lib/format';
 import { useSession } from '../lib/session';
 import type { Profile } from '../lib/types';
 import { useLoader } from '../lib/useLoader';
@@ -42,6 +43,7 @@ export default function AddHistory() {
   return (
     <Screen>
       <ScanCard />
+      <ForwardCard />
 
       <Card>
         <H2>Or describe it</H2>
@@ -84,7 +86,8 @@ export default function AddHistory() {
         <Section title="Your documents">
           {documents.map((d, i) => (
             <Row key={d.id} title={`${DOC_TYPE_LABEL[d.doc_type]}${d.subject !== 'self' ? ` · ${label(d.subject)}` : ''}`}
-                 detail={`${formatDay(d.doc_date)}${d.status === 'review' ? ' · waiting for your review' : ''}`}
+                 detail={[formatDay(d.doc_date), d.source ? VIA_LABEL[d.source] : '', d.status === 'review' ? 'waiting for your review' : '']
+                   .filter(Boolean).join(' · ')}
                  onPress={() => router.push({ pathname: '/document/[id]', params: { id: d.id } })}
                  last={i === documents.length - 1} />
           ))}
