@@ -163,6 +163,8 @@ def test_whatsapp_link_then_send_a_photo(api, wa):
     assert not any("HbA1c" in body or "Sunita" in body for _, body in wa.sent)
 
     wa_post(api, wa_payload(phone, {"type": "audio", "audio": {"id": "a1"}}))
+    assert "Voice notes" in wa.sent[-1][1]
+    wa_post(api, wa_payload(phone, {"type": "sticker", "sticker": {"id": "s1"}}))
     assert "photo or a PDF" in wa.sent[-1][1]
 
     assert api.delete("/v1/inbound/whatsapp", headers=h).status_code == 204

@@ -122,7 +122,7 @@ def verify_meta_signature(app_secret: str, raw_body: bytes, header: Optional[str
 @dataclass
 class WhatsAppMessage:
     sender: str          # the sender's phone number, digits only
-    kind: str            # text | image | document | other
+    kind: str            # text | image | document | audio | other
     text: str = ""
     media_id: Optional[str] = None
     mime_type: Optional[str] = None
@@ -136,7 +136,7 @@ def whatsapp_messages(payload: dict) -> list[WhatsAppMessage]:
             for m in (change.get("value") or {}).get("messages") or []:
                 kind = m.get("type")
                 msg = WhatsAppMessage(sender=re.sub(r"\D", "", m.get("from", "")), kind=kind if kind in (
-                    "text", "image", "document") else "other")
+                    "text", "image", "document", "audio") else "other")
                 if kind == "text":
                     msg.text = (m.get("text") or {}).get("body", "")
                 elif kind in ("image", "document"):
@@ -147,13 +147,4 @@ def whatsapp_messages(payload: dict) -> list[WhatsAppMessage]:
                     out.append(msg)
     return out
 
-
-REPLY = {
-    "linked": "Your WhatsApp is now connected to Family Health Graph. Send a photo or PDF of a prescription or "
-              "lab report any time, and we'll get it ready for you to review in the app.",
-    "received": "Got it. Open Family Health Graph to check what we read before it's added to your record.",
-    "unsupported": "Please send a photo or a PDF of the document.",
-    "unknown": "This number isn't connected yet. In the Family Health Graph app, go to Add health information → "
-               "Forward by WhatsApp, and send us the code shown there.",
-    "too_many": "That's a lot of documents in one hour. Please send the rest a little later.",
-}
+# Reply texts, in six languages, live in fhg/i18n.py.

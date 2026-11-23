@@ -267,6 +267,8 @@ CREATE TABLE IF NOT EXISTS inbound_channels (
     whatsapp_phone BLOB,
     link_code_hash TEXT,
     link_code_expires TEXT,
+    lang TEXT,                        -- WhatsApp reply language (en, hi, bn, ta, te, mr)
+    pending BLOB,                     -- encrypted: what a "1/2/3" reply would save
     updated_at TEXT NOT NULL
 );
 """
@@ -294,6 +296,8 @@ class Store:
         self._add_column_if_missing("documents", "subject_member_id", "TEXT")
         self._add_column_if_missing("documents", "source", "TEXT NOT NULL DEFAULT 'upload'")
         self._add_column_if_missing("partners", "redirect_uris", "TEXT")
+        self._add_column_if_missing("inbound_channels", "lang", "TEXT")
+        self._add_column_if_missing("inbound_channels", "pending", "BLOB")
         self._add_column_if_missing("partners", "client_secret_hash", "TEXT")
 
     def _add_column_if_missing(self, table: str, column: str, decl: str) -> None:
@@ -1087,6 +1091,16 @@ class Store:
     def user_for_whatsapp(self, key: str) -> Optional[str]:
         rows = self._query("SELECT user_id FROM inbound_channels WHERE whatsapp_key = ?", (key,))
         return rows[0]["user_id"] if rows else None
+
+    def set_whatsapp_lang(self, user_id: str, lang: str) -> None:
+        self._upsert_inbound(user_id, lang=lang)
+
+    def set_whatsapp_pending(self, user_id: str, pending: Optional[dict]) -> None:
+        self._upsert_inbound(user_id, pending=self._cipher.encrypt(json.dumps(pending)) if pending else None)
+
+    def whatsapp_pending(self, user_id: str) -> Optional[dict]:
+        row = self.inbound(user_id)
+        return json.loads(self._cipher.decrypt(row["pending"])) if row.get("pending") else None
 
     def whatsapp_phone(self, user_id: str) -> Optional[str]:
         row = self.inbound(user_id)

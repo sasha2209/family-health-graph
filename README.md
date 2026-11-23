@@ -167,6 +167,7 @@ Design principles:
 | `ANTHROPIC_API_KEY`, `FHG_LLM_MODEL` | unset, `claude-opus-5-5` | Optional AI summaries |
 | `FHG_INBOUND_EMAIL_DOMAIN`, `FHG_INBOUND_EMAIL_SECRET` | unset (off) | Forward-by-email addresses and the inbound webhook secret, see [docs/FORWARDING.md](docs/FORWARDING.md) |
 | `FHG_WHATSAPP_NUMBER`, `FHG_WHATSAPP_VERIFY_TOKEN`, `FHG_WHATSAPP_APP_SECRET`, `FHG_WHATSAPP_ACCESS_TOKEN`, `FHG_WHATSAPP_PHONE_NUMBER_ID` | unset (off) | Forward by WhatsApp (Business Cloud API) |
+| `FHG_OCR_LANGS` | `eng+hin` | OCR languages (installed Tesseract packs only) |
 | `FHG_SMART_PROVIDERS` | unset | Patient portals users can connect (SMART on FHIR): JSON list of `{"id","name","iss","client_id"}`, see [docs/CONNECTIONS.md](docs/CONNECTIONS.md) |
 | `FHG_DOC_MODEL` | `claude-opus-5-5` | Model for the document-reading fallback (only used for documents OCR and rules can't read, and only with the user's consent) |
 | `FHG_AUTH_SECRET` | dev value | Keys email lookups and sign-in codes; **set a long random value in production** |

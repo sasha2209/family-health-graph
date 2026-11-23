@@ -10,10 +10,12 @@ with no text and the pipeline decides whether the AI reader may look at the imag
 from __future__ import annotations
 
 import io
+import os
 import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -55,6 +57,20 @@ def tesseract_available() -> bool:
     return shutil.which("tesseract") is not None
 
 
+@lru_cache(maxsize=1)
+def ocr_languages() -> str:
+    """English plus the Indian scripts that are installed, limited by FHG_OCR_LANGS (default eng+hin).
+    Each extra language slows OCR, so add others (ben, tam, tel, mar) only where the users need them."""
+    wanted = os.environ.get("FHG_OCR_LANGS", "eng+hin").split("+")
+    try:
+        out = subprocess.run(["tesseract", "--list-langs"], capture_output=True, text=True, timeout=10).stdout
+        installed = set(out.split()[1:]) if out else set()
+    except (OSError, subprocess.SubprocessError):
+        installed = set()
+    langs = [lang for lang in wanted if lang in installed] or ["eng"]
+    return "+".join(langs)
+
+
 def _prepare(image_bytes: bytes) -> bytes:
     """Straighten, grayscale and enlarge small photos: cheap steps that noticeably help Tesseract."""
     from PIL import Image, ImageOps
@@ -78,7 +94,7 @@ def _tesseract(png: bytes) -> tuple[str, Optional[float]]:
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp) / "page.png"
         src.write_bytes(png)
-        proc = subprocess.run(["tesseract", str(src), "stdout", "-l", "eng", "--psm", "4", "tsv"],
+        proc = subprocess.run(["tesseract", str(src), "stdout", "-l", ocr_languages(), "--psm", "4", "tsv"],
                               capture_output=True, timeout=90, check=False)
     if proc.returncode != 0:
         return "", None

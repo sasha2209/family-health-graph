@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
-from . import auth, clinic, inbound, partners, push, trends
+from . import auth, clinic, i18n, inbound, partners, push, trends
 from .connectors import smart
 from . import partner_oauth as poauth
 from .clinician_report import render_html as clinician_report_html
@@ -38,7 +38,7 @@ from .insights import generate_insights, summarize
 from .merge import find_match, merge_into
 from .models import Condition, FamilyMember, HealthProfile, Medication, Observation, Relationship, Sex
 from .security import constant_time_equals, hash_token, load_cipher, pseudonym
-from .sharing import CONSENT_AI_DOCS, CONSENT_LLM, CONSENT_RESEARCH, PARTNERS, deidentify, partner_payload, share_scope
+from .sharing import CONSENT_AI_DOCS, CONSENT_LLM, CONSENT_WA_SUMMARIES, CONSENT_RESEARCH, PARTNERS, deidentify, partner_payload, share_scope
 from .storage import Store
 from .terminology import CONCEPTS_BY_CATEGORY as _CONCEPTS, OBSERVATION_ALIASES, OBSERVATION_TO_LOINC, category_from_text
 
@@ -110,6 +110,13 @@ class Settings:
             android_package=os.environ.get("FHG_ANDROID_PACKAGE") or None,
             android_cert_sha256=_csv("FHG_ANDROID_CERT_SHA256"),
         )
+
+
+def formatday(iso: str) -> str:
+    try:
+        return date.fromisoformat(iso[:10]).strftime("%d %b %Y").lstrip("0")
+    except ValueError:
+        return iso
 
 
 def _connect_page(message: str, back: Optional[str]) -> str:
@@ -349,7 +356,7 @@ def create_app(settings: Optional[Settings] = None,
     if settings.cors_origins:
         app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins),
                            allow_methods=["*"], allow_headers=["Authorization", "Content-Type"])
-    valid_scopes = {CONSENT_LLM, CONSENT_AI_DOCS, CONSENT_RESEARCH} | {share_scope(p) for p in PARTNERS}
+    valid_scopes = {CONSENT_LLM, CONSENT_AI_DOCS, CONSENT_WA_SUMMARIES, CONSENT_RESEARCH} | {share_scope(p) for p in PARTNERS}
 
     def optional_session(authorization: Optional[str] = Header(None)) -> Optional[dict]:
         if not authorization or not authorization.lower().startswith("bearer "):
@@ -938,36 +945,139 @@ def create_app(settings: Optional[Settings] = None,
             return Response(challenge, media_type="text/plain")
         raise HTTPException(403, "Verification failed")
 
+    # --- the WhatsApp assistant (docs/FORWARDING.md) ---
+    WA_SUBJECTS = {"1": "self", "2": "mother", "3": "father"}
+
+    def wa_items(extraction: dict) -> list[str]:
+        """Short lines describing what a document contained (only sent with the user's consent)."""
+        lines = [f"• {c['name']}" for c in extraction.get("conditions", [])[:4]]
+        for o in extraction.get("observations", [])[:5]:
+            band = trends.band_for(o["code"], trends.normalise(o["code"], o["value"], o.get("unit", ""))[0])
+            lines.append(f"• {o.get('display') or o['code']}: {o['value']:g} {o.get('unit', '')}".rstrip()
+                         + (f" ({band['label'].lower()})" if band and band["tone"] != "good" else ""))
+        for m in extraction.get("medications", [])[:5]:
+            generic = m.get("generic")
+            lines.append(f"• {m['name']}" + (f" ({generic})" if generic and generic.split()[0] not in m['name'].lower() else ""))
+        for r in extraction.get("family", [])[:3]:
+            lines.append(f"• {r['relationship'].replace('_', ' ').capitalize()}: " + ", ".join(c["name"] for c in r["conditions"]))
+        return lines
+
+    def wa_family_lines(fragment: HealthProfile) -> list[str]:
+        lines = [f"• {m.relationship.value.replace('_', ' ').capitalize()}: " + ", ".join(
+            c.display_name + (f" (at {c.onset_age})" if c.onset_age is not None else "") for c in m.conditions)
+            for m in fragment.family if m.conditions]
+        lines += [f"• You: {c.display_name}" for c in fragment.conditions]
+        return lines
+
+    def wa_save_pending(user_id: str, choice: str) -> str:
+        pending = store.whatsapp_pending(user_id)
+        if not pending:
+            return "nothing_pending"
+        if "doc" in pending:
+            doc = store.document(user_id, pending["doc"])
+            if doc is None or doc["status"] == "saved":
+                store.set_whatsapp_pending(user_id, None)
+                return "nothing_pending"
+            e = doc["extraction"]
+            subject = WA_SUBJECTS.get(choice, "self")
+            save_document(doc["id"], DocumentSaveIn(
+                subject=subject, doc_type=e.get("doc_type", "other"), doc_date=e.get("doc_date"),
+                conditions=e.get("conditions", []), medications=e.get("medications", []),
+                observations=e.get("observations", []), family=e.get("family", [])), user_id=user_id)
+        elif "text" in pending:
+            ingest(user_id, "whatsapp", pending["text"], parse_family_history_text(pending["text"]), preview=False)
+        store.set_whatsapp_pending(user_id, None)
+        store.audit(user_id, "whatsapp", "whatsapp.saved", {"kind": "doc" if "doc" in pending else "text"})
+        return "saved"
+
+    def wa_summary(user_id: str) -> str:
+        report = generate_insights(effective_profile(store, user_id))
+        if not report.insights:
+            return "summary_none"
+        return "\n".join(f"• {i.title}" for i in report.insights[:5])
+
     def handle_whatsapp(msg: inbound.WhatsAppMessage) -> None:
         key = inbound.phone_key(settings.auth_secret, msg.sender)
-        reply = lambda kind: wa_client.send_text(msg.sender, inbound.REPLY[kind])  # noqa: E731
+        user_id = store.user_for_whatsapp(key)
+        row = store.inbound(user_id) if user_id else {}
+        lang = row.get("lang") or i18n.detect_script(msg.text) or "en"
+        send = lambda text: wa_client.send_text(msg.sender, text)  # noqa: E731
+        say = lambda key_, **v: send(i18n.t(key_, lang, **v))  # noqa: E731
         try:
             if msg.kind == "text":
                 m = re.search(r"\b(\d{6})\b", msg.text)
                 linking_user = store.user_for_link_code(link_code_hash(m.group(1))) if m else None
                 if linking_user:
                     store.link_whatsapp(linking_user, key, msg.sender)
+                    if i18n.detect_script(msg.text):
+                        store.set_whatsapp_lang(linking_user, lang)
                     store.audit(linking_user, "whatsapp", "inbound.whatsapp_linked")
-                    reply("linked")
-                elif store.user_for_whatsapp(key) is None:
-                    reply("unknown")
+                    say("linked")
+                    return
+                if user_id is None:
+                    say("unknown")
+                    return
+                if not row.get("lang") and i18n.detect_script(msg.text):
+                    store.set_whatsapp_lang(user_id, lang)
+                words = msg.text.strip().lower().split()
+                command = words[0] if words else ""
+                allowed = store.has_consent(user_id, CONSENT_WA_SUMMARIES)
+                if command in ("help", "menu", "मदद", "?"):
+                    say("help")
+                elif command == "lang" and len(words) > 1 and words[1] in i18n.LANGS:
+                    lang = words[1]
+                    store.set_whatsapp_lang(user_id, lang)
+                    say("lang_set")
+                elif command in ("stop", "रोको", "बंद"):
+                    store.unlink_whatsapp(user_id)
+                    store.audit(user_id, "whatsapp", "inbound.whatsapp_unlinked")
+                    say("stopped")
+                elif command in ("summary", "सारांश"):
+                    if not allowed:
+                        say("private")
+                    else:
+                        body = wa_summary(user_id)
+                        send(i18n.t(body, lang) if body == "summary_none" else i18n.t("summary_header", lang) + "\n" + body)
+                elif msg.text.strip() in WA_SUBJECTS:
+                    say(wa_save_pending(user_id, msg.text.strip()))
                 else:
-                    reply("unsupported")
+                    fragment = parse_family_history_text(msg.text)
+                    if not (fragment.family or fragment.conditions):
+                        say("not_understood")
+                        return
+                    store.set_whatsapp_pending(user_id, {"text": msg.text})
+                    if allowed:
+                        say("understood", items="\n".join(wa_family_lines(fragment)))
+                    else:
+                        say("understood_private")
                 return
-            user_id = store.user_for_whatsapp(key)
             if user_id is None:
-                reply("unknown")
+                say("unknown")
+                return
+            if msg.kind == "audio":
+                say("voice")
                 return
             if msg.kind == "other" or not msg.media_id or (msg.mime_type and msg.mime_type not in inbound.ACCEPTED_TYPES):
-                reply("unsupported")
+                say("unsupported")
                 return
             try:
-                read_and_store(user_id, wa_client.download(msg.media_id), msg.filename, source="whatsapp")
+                doc, _ = read_and_store(user_id, wa_client.download(msg.media_id), msg.filename, source="whatsapp")
             except HTTPException as exc:
-                reply("too_many" if exc.status_code == 429 else "unsupported")
+                say("too_many" if exc.status_code == 429 else "unsupported")
                 return
             forwarded(user_id, 1, "WhatsApp")
-            reply("received")
+            store.set_whatsapp_pending(user_id, {"doc": doc["id"]})
+            if not store.has_consent(user_id, CONSENT_WA_SUMMARIES):
+                say("received")
+                return
+            e = doc["extraction"]
+            items = wa_items(e)
+            if not items:
+                say("read_nothing")
+                return
+            doc_name = i18n.DOC_NAMES.get(e.get("doc_type", "other"), i18n.DOC_NAMES["other"])
+            say("read_summary", doc=doc_name.get(lang, doc_name["en"]),
+                date=f" ({formatday(e['doc_date'])})" if e.get("doc_date") else "", items="\n".join(items))
         except Exception:
             log.exception("WhatsApp message handling failed")
 

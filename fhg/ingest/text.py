@@ -140,7 +140,10 @@ def parse_relationship(text: str) -> Optional[Relationship]:
 
 
 def parse_family_history_text(text: str) -> HealthProfile:
-    """Return a profile fragment containing what the text describes."""
+    """Return a profile fragment containing what the text describes (English, Hindi or Hinglish)."""
+    from ..i18n import normalize_family_text
+
+    text = normalize_family_text(text)
     fragment = HealthProfile()
     members: list[FamilyMember] = []
 
