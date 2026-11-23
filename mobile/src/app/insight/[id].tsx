@@ -1,9 +1,9 @@
-import { Stack, useLocalSearchParams } from 'expo-router';
-import { Linking, Text, View } from 'react-native';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { Linking, Pressable, Text, View } from 'react-native';
 
 import { Badge, Row, Section } from '../../components/list';
 import { Body, ErrorText, Loading, Screen } from '../../components/ui';
-import { REFERRAL_LABEL } from '../../lib/format';
+import { BOOKING_LABEL, formatDay, REFERRAL_LABEL, rupees } from '../../lib/format';
 import { useSession } from '../../lib/session';
 import { LEVEL_LABEL, usePalette } from '../../lib/theme';
 import { useLoader } from '../../lib/useLoader';
@@ -19,14 +19,15 @@ export default function InsightDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const c = usePalette();
   const { api } = useSession();
-  const { data, error } = useLoader(async () => {
-    const [report, referrals] = await Promise.all([api.insights(), api.referrals()]);
+  const { data, error, reload } = useLoader(async () => {
+    const [report, referrals, tests] = await Promise.all([api.insights(), api.referrals(), api.insightTests(id)]);
     return { insight: report.insights.find((i) => i.rule_id === id) ?? null, disclaimer: report.disclaimer,
-             referrals: referrals.filter((r) => r.rule_id === id) };
+             referrals: referrals.filter((r) => r.rule_id === id), tests };
   });
 
   if (!data) return <Screen>{error ? <ErrorText>{error}</ErrorText> : <Loading />}</Screen>;
-  const { insight, disclaimer, referrals } = data;
+  const { insight, disclaimer, referrals, tests } = data;
+  const active = tests.bookings.filter((b) => ['requested', 'scheduled', 'sample_collected'].includes(b.status));
   if (!insight) {
     return <Screen><Body muted>This item no longer applies. Your record may have changed.</Body></Screen>;
   }
@@ -66,6 +67,54 @@ export default function InsightDetail() {
       <Section title="What you can do">
         <View style={{ padding: 16 }}><Body>{insight.recommendation}</Body></View>
       </Section>
+
+      {tests.bookings.length > 0 && (
+        <Section title="Your bookings">
+          {tests.bookings.map((b, i) => (
+            <View key={b.id}>
+              <Row title={`${b.test_names.join(', ')} · ${b.partner_name}`}
+                   detail={[BOOKING_LABEL[b.status], b.scheduled_for ? formatDay(b.scheduled_for) : null].filter(Boolean).join(' · ')}
+                   last={i === tests.bookings.length - 1 && !active.includes(b)} />
+              {active.includes(b) && (
+                <View style={{ flexDirection: 'row', gap: 16, paddingHorizontal: 16, paddingBottom: 12 }}>
+                  <Pressable accessibilityRole="button" onPress={async () => { await api.cancelBooking(b.id); reload(); }}>
+                    <Text style={{ color: c.danger, fontSize: 14 }}>Cancel booking</Text>
+                  </Pressable>
+                  <Pressable accessibilityRole="button" onPress={async () => { await api.bookingDoneElsewhere(b.id); reload(); }}>
+                    <Text style={{ color: c.accent, fontSize: 14 }}>I had it done elsewhere</Text>
+                  </Pressable>
+                </View>
+              )}
+            </View>
+          ))}
+        </Section>
+      )}
+
+      {tests.tests.length > 0 && active.length === 0 && (
+        <Section title="Get tested">
+          {tests.tests.map((t) => (
+            <View key={t.test}>
+              <View style={{ paddingHorizontal: 16, paddingTop: 14, gap: 2 }}>
+                <Text style={{ color: c.text, fontSize: 16, fontWeight: '600' }}>{t.name}</Text>
+                <Body muted style={{ fontSize: 13 }}>{t.prep}</Body>
+              </View>
+              {t.offers.length === 0 ? (
+                <View style={{ paddingHorizontal: 16, paddingVertical: 10 }}>
+                  <Body muted style={{ fontSize: 13 }}>No partner offers this yet. Your doctor or any lab can do it.</Body>
+                </View>
+              ) : t.offers.map((o) => (
+                <Row key={o.partner_id} title={o.partner_name}
+                     detail={[rupees(o.price_inr), o.home_collection ? 'home collection' : null,
+                              o.turnaround_days != null ? `results in ${o.turnaround_days} day${o.turnaround_days === 1 ? '' : 's'}` : null]
+                       .filter(Boolean).join(' · ')}
+                     onPress={() => router.push({ pathname: '/book', params: {
+                       rule: insight.rule_id, partner: o.partner_id, partnerName: o.partner_name, tests: t.test,
+                       testName: t.name, price: o.price_inr != null ? String(o.price_inr) : '' } })} />
+              ))}
+            </View>
+          ))}
+        </Section>
+      )}
 
       {insight.references.length > 0 && (
         <Section title="Based on">

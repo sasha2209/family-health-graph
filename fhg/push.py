@@ -29,6 +29,8 @@ PUSH_TEXT = {
     "invitation_accepted": "A relative accepted your invitation.",
     "referral": "Your care team updated a referral for you.",
     "documents_received": "Your forwarded documents are ready to review.",
+    "booking": "There's an update on your test booking.",
+    "reminder": "A health check is still due. Open the app to book it.",
 }
 DEFAULT_TEXT = "You have a new update."
 

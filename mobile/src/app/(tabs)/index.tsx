@@ -5,7 +5,7 @@ import { Text, View } from 'react-native';
 import { Badge, Check, Progress, Row, Section } from '../../components/list';
 import { Banner, Body, Button, Card, ErrorText, H2, Loading, Screen, styles } from '../../components/ui';
 import { shareDoctorSummary } from '../../lib/doctorSummary';
-import { DOC_TYPE_LABEL, formatDay, REFERRAL_LABEL, VIA_LABEL } from '../../lib/format';
+import { BOOKING_LABEL, DOC_TYPE_LABEL, formatDay, REFERRAL_LABEL, VIA_LABEL } from '../../lib/format';
 import { pushSupport } from '../../lib/push';
 import { useSession } from '../../lib/session';
 import { LEVEL_LABEL, usePalette } from '../../lib/theme';
@@ -28,9 +28,9 @@ export default function HomeScreen() {
   const c = usePalette();
   const { api } = useSession();
   const { data, error, refreshing, reload } = useLoader(async () => {
-    const [report, notes, own, links, me, push, referrals, documents] = await Promise.all([
+    const [report, notes, own, links, me, push, referrals, documents, myBookings] = await Promise.all([
       api.insights(), api.notifications(), api.profile(false), api.links(), api.me(), api.pushStatus(),
-      api.referrals(), api.documents()]);
+      api.referrals(), api.documents(), api.bookings()]);
     const rels = new Set(own.family.map((m) => m.relationship));
     const steps: { title: string; detail: string; done: boolean; href: Href }[] = [
       { title: 'Add your family’s health history', detail: 'Start with what you know. A sentence or two is fine.',
@@ -56,7 +56,8 @@ export default function HomeScreen() {
     }
     const pending = documents.filter((d) => d.status === 'review');
     const testCount = new Set((own.observations ?? []).map((o) => o.code)).size;
-    return { report, notes: notes.filter((n) => !n.read), steps, referrals, pending, testCount };
+    const activeBookings = myBookings.filter((b) => ['requested', 'scheduled', 'sample_collected'].includes(b.status));
+    return { report, notes: notes.filter((n) => !n.read), steps, referrals, pending, testCount, activeBookings };
   });
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryBusy, setSummaryBusy] = useState(false);
@@ -64,7 +65,7 @@ export default function HomeScreen() {
   const [pdfError, setPdfError] = useState<string | null>(null);
 
   if (!data) return <Screen>{error ? <ErrorText>{error}</ErrorText> : <Loading />}</Screen>;
-  const { report, notes, steps, referrals, pending, testCount } = data;
+  const { report, notes, steps, referrals, pending, testCount, activeBookings } = data;
   const done = steps.filter((s) => s.done).length;
   const todo = steps.filter((s) => !s.done);
   const urgent = report.insights.filter((i) => i.level === 'high').length;
@@ -100,6 +101,17 @@ export default function HomeScreen() {
                  detail={[formatDay(d.doc_date), d.source ? VIA_LABEL[d.source] : ''].filter(Boolean).join(' · ')}
                  onPress={() => router.push({ pathname: '/document/[id]', params: { id: d.id } })}
                  last={i === pending.length - 1} />
+          ))}
+        </Section>
+      )}
+
+      {activeBookings.length > 0 && (
+        <Section title="Your tests">
+          {activeBookings.map((b, i) => (
+            <Row key={b.id} title={`${b.test_names.join(', ')} · ${b.partner_name}`}
+                 detail={[BOOKING_LABEL[b.status], b.scheduled_for ? formatDay(b.scheduled_for) : null].filter(Boolean).join(' · ')}
+                 onPress={b.rule_id ? () => router.push({ pathname: '/insight/[id]', params: { id: b.rule_id as string } }) : undefined}
+                 last={i === activeBookings.length - 1} />
           ))}
         </Section>
       )}

@@ -211,6 +211,31 @@ CREATE TABLE IF NOT EXISTS documents (
     saved_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id, created_at);
+-- Tests booked from an action item. Contact details are encrypted and shared only with the chosen partner.
+CREATE TABLE IF NOT EXISTS bookings (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    partner_id TEXT NOT NULL REFERENCES partners(id),
+    rule_id TEXT,
+    tests TEXT NOT NULL,              -- JSON list of test codes
+    status TEXT NOT NULL,             -- requested | scheduled | sample_collected | completed | cancelled | completed_elsewhere
+    preferred_date TEXT,
+    slot TEXT,
+    scheduled_for TEXT,
+    contact BLOB NOT NULL,            -- encrypted JSON {name, phone, address, pincode}
+    price_inr REAL,
+    note BLOB,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_bookings_user ON bookings(user_id);
+CREATE INDEX IF NOT EXISTS idx_bookings_partner ON bookings(partner_id, status);
+CREATE TABLE IF NOT EXISTS nudges (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    sent_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_nudges_user ON nudges(user_id);
 -- Connect with Family Health Graph: OAuth for partners. A grant is the user's consent artefact.
 CREATE TABLE IF NOT EXISTS oauth_grants (
     id TEXT PRIMARY KEY,
@@ -299,6 +324,7 @@ class Store:
         self._add_column_if_missing("inbound_channels", "lang", "TEXT")
         self._add_column_if_missing("inbound_channels", "pending", "BLOB")
         self._add_column_if_missing("partners", "client_secret_hash", "TEXT")
+        self._add_column_if_missing("partners", "catalog", "TEXT")
 
     def _add_column_if_missing(self, table: str, column: str, decl: str) -> None:
         cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
@@ -518,6 +544,77 @@ class Store:
     def partner_for_key(self, api_key: str) -> Optional[dict]:
         rows = self._query("SELECT id FROM partners WHERE api_key_hash = ? AND active = 1", (hash_token(api_key),))
         return self.partner(rows[0]["id"]) if rows else None
+
+    # --- test bookings ----------------------------------------------------------
+    def set_partner_catalog(self, partner_id: str, catalog: list[dict]) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE partners SET catalog = ? WHERE id = ?", (json.dumps(catalog), partner_id))
+
+    def partners_with_catalog(self) -> list[dict]:
+        rows = self._query("SELECT id, name, kind, catalog FROM partners WHERE active = 1 AND catalog IS NOT NULL")
+        return [{"id": r["id"], "name": r["name"], "kind": r["kind"], "catalog": json.loads(r["catalog"])} for r in rows]
+
+    def create_booking(self, user_id: str, partner_id: str, rule_id: Optional[str], tests: list[str],
+                       preferred_date: Optional[str], slot: Optional[str], contact: dict, price_inr: Optional[float]) -> str:
+        booking_id, now = uuid.uuid4().hex[:16], _now()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO bookings (id, user_id, partner_id, rule_id, tests, status, preferred_date, slot, contact, "
+                "price_inr, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'requested', ?, ?, ?, ?, ?, ?)",
+                (booking_id, user_id, partner_id, rule_id, json.dumps(tests), preferred_date, slot,
+                 self._cipher.encrypt(json.dumps(contact)), price_inr, now, now))
+        return booking_id
+
+    def _booking_row(self, r: sqlite3.Row, with_contact: bool) -> dict:
+        out = {k: r[k] for k in ("id", "user_id", "partner_id", "rule_id", "status", "preferred_date", "slot",
+                                 "scheduled_for", "price_inr", "created_at", "updated_at")}
+        out["tests"] = json.loads(r["tests"])
+        out["partner_name"] = r["partner_name"]
+        out["note"] = self._cipher.decrypt(r["note"]) if r["note"] else None
+        if with_contact:
+            out["contact"] = json.loads(self._cipher.decrypt(r["contact"]))
+        return out
+
+    _BOOKING_SQL = "SELECT b.*, p.name AS partner_name FROM bookings b JOIN partners p ON p.id = b.partner_id "
+
+    def booking(self, booking_id: str, with_contact: bool = False) -> Optional[dict]:
+        rows = self._query(self._BOOKING_SQL + "WHERE b.id = ?", (booking_id,))
+        return self._booking_row(rows[0], with_contact) if rows else None
+
+    def bookings_for_user(self, user_id: str) -> list[dict]:
+        rows = self._query(self._BOOKING_SQL + "WHERE b.user_id = ? ORDER BY b.created_at DESC", (user_id,))
+        return [self._booking_row(r, False) for r in rows]
+
+    def bookings_for_partner(self, partner_id: str, status: Optional[str] = None) -> list[dict]:
+        sql, params = self._BOOKING_SQL + "WHERE b.partner_id = ?", [partner_id]
+        if status:
+            sql += " AND b.status = ?"
+            params.append(status)
+        rows = self._query(sql + " ORDER BY b.created_at DESC", tuple(params))
+        return [self._booking_row(r, True) for r in rows]
+
+    def update_booking(self, booking_id: str, *, status: str, scheduled_for: Optional[str] = None,
+                       note: Optional[str] = None) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE bookings SET status = ?, scheduled_for = COALESCE(?, scheduled_for), "
+                "note = COALESCE(?, note), updated_at = ? WHERE id = ?",
+                (status, scheduled_for, self._cipher.encrypt(note) if note else None, _now(), booking_id))
+
+    def booking_metrics(self) -> list[dict]:
+        rows = self._query("SELECT p.name AS partner, b.status, COUNT(*) AS n, SUM(COALESCE(b.price_inr, 0)) AS value_inr "
+                           "FROM bookings b JOIN partners p ON p.id = b.partner_id GROUP BY p.name, b.status ORDER BY p.name")
+        return [dict(r) for r in rows]
+
+    def nudges(self, user_id: str) -> list[dict]:
+        return [dict(r) for r in self._query("SELECT key, sent_at FROM nudges WHERE user_id = ?", (user_id,))]
+
+    def record_nudge(self, user_id: str, key: str, at: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("INSERT INTO nudges (user_id, key, sent_at) VALUES (?, ?, ?)", (user_id, key, at))
+
+    def user_ids(self) -> list[str]:
+        return [r["id"] for r in self._query("SELECT id FROM users")]
 
     def set_partner_oauth(self, partner_id: str, redirect_uris: list[str], confidential: bool) -> Optional[str]:
         """Register OAuth redirect URIs; returns a new client secret for confidential clients (shown once)."""

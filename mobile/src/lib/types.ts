@@ -270,3 +270,16 @@ export interface Grant {
   expires_at: string;
   last_used_at: string | null;
 }
+
+// --- test booking ---------------------------------------------------------------------------
+export interface TestOffer {
+  test: string; name: string; prep: string; service: boolean;
+  offers: { partner_id: string; partner_name: string; price_inr: number | null; home_collection: boolean;
+            turnaround_days: number | null }[];
+}
+export type BookingStatus = 'requested' | 'scheduled' | 'sample_collected' | 'completed' | 'cancelled' | 'completed_elsewhere';
+export interface Booking {
+  id: string; partner_id: string; partner_name: string; rule_id: string | null; tests: string[]; test_names: string[];
+  status: BookingStatus; preferred_date: string | null; slot: string | null; scheduled_for: string | null;
+  price_inr: number | null; created_at: string; note: string | null;
+}

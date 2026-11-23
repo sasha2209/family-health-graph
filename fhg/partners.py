@@ -76,6 +76,19 @@ class PartnerNotifier:
         self.store, self.sender = store, sender
         self._pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="webhook") if background else None
 
+    def notify_event(self, partner_id: str, kind: str, data: dict) -> None:
+        """A health-data-free event with arbitrary ids (e.g. {"booking_id": ...})."""
+        partner = self.store.partner(partner_id)
+        secret = self.store.partner_webhook_secret(partner_id)
+        if not partner or not partner["webhook_url"] or not secret:
+            return
+        body = json.dumps({"id": "evt_" + uuid.uuid4().hex[:16], "type": kind,
+                           "created": datetime.now(timezone.utc).isoformat(), "data": data}).encode()
+        headers = {"Content-Type": "application/json", "X-FHG-Signature": sign(secret, body),
+                   "User-Agent": "FamilyHealthGraph-Webhooks/1"}
+        job: Callable[[], None] = lambda: self._deliver(partner["webhook_url"], body, headers)
+        self._pool.submit(job) if self._pool else job()
+
     def notify(self, partner_id: str, kind: str, referral_id: str) -> None:
         partner = self.store.partner(partner_id)
         secret = self.store.partner_webhook_secret(partner_id)
