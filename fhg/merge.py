@@ -5,6 +5,7 @@ spreadsheet). Merging is additive and de-duplicating; it never deletes.
 """
 from __future__ import annotations
 
+from .medicines import lookup as lookup_medicine
 from .models import (
     SINGULAR_RELATIONSHIPS,
     Condition,
@@ -55,14 +56,30 @@ def merge_observations(existing: list[Observation], incoming: list[Observation])
     return added
 
 
+def _med_key(m: Medication) -> str:
+    # The same medicine under different brands ("Telma 40", "Telsar 40", "Telmisartan 40 mg") is one medicine.
+    return (m.generic or m.name).strip().lower()
+
+
+def _enrich(m: Medication) -> Medication:
+    if not m.generic:
+        info = lookup_medicine(m.name)
+        if info:
+            m.generic, m.drug_class = info.generic, info.drug_class
+    return m
+
+
 def merge_medications(existing: list[Medication], incoming: list[Medication]) -> int:
-    by_name = {m.name.strip().lower(): m for m in existing}
+    for m in existing:
+        _enrich(m)
+    by_name = {_med_key(m): m for m in existing}
     added = 0
     for m in incoming:
-        old = by_name.get(m.name.strip().lower())
+        _enrich(m)
+        old = by_name.get(_med_key(m))
         if old is None:
             existing.append(m)
-            by_name[m.name.strip().lower()] = m
+            by_name[_med_key(m)] = m
             added += 1
         elif m.prescribed_on and (old.prescribed_on is None or m.prescribed_on >= old.prescribed_on):
             # A newer prescription for the same medicine: keep the latest dosing.

@@ -41,6 +41,8 @@ export default function HomeScreen() {
         done: rels.has('mother') && rels.has('father'), href: '/add-history' },
       { title: 'Add your grandparents', detail: 'Patterns on one side of the family change screening advice.',
         done: [...rels].some((r) => GRANDPARENT.test(r)), href: '/add-history' },
+      { title: 'Check your diabetes risk', detail: 'Two quick questions for the Indian Diabetes Risk Score.',
+        done: !!own.activity && (own.observations ?? []).some((o) => o.code === 'waist_circumference'), href: '/settings' },
       { title: 'Add your date of birth and sex', detail: 'So age- and sex-specific guidance applies.',
         done: !!own.birth_date && !!own.sex, href: '/settings' },
       { title: 'Invite a relative', detail: 'Their own history makes both of your insights more accurate.',

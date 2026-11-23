@@ -143,6 +143,8 @@ class Medication(BaseModel):
     name: str
     status: str = "active"
     dosage: Optional[str] = None  # as written, e.g. "500 mg, 1-0-1 after food, 30 days"
+    generic: Optional[str] = None  # e.g. "telmisartan" for "Telma 40" (fhg/medicines.py)
+    drug_class: Optional[str] = None
     prescribed_on: Optional[date] = None
     source: str = "manual"
 
@@ -214,6 +216,9 @@ class HealthProfile(BaseModel):
     observations: list[Observation] = Field(default_factory=list)
     medications: list[Medication] = Field(default_factory=list)
     family: list[FamilyMember] = Field(default_factory=list)
+    # Physical activity, for the Indian Diabetes Risk Score:
+    # "exercise_and_active_work" | "exercise_or_active_work" | "sedentary"
+    activity: Optional[str] = None
     updated_at: Optional[datetime] = None
 
     def age(self, today: Optional[date] = None) -> Optional[int]:

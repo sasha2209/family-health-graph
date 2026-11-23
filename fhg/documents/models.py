@@ -19,6 +19,8 @@ class ExtractedCondition(BaseModel):
 class ExtractedMedication(BaseModel):
     name: str
     dosage: Optional[str] = None
+    generic: Optional[str] = None      # from the Indian brand list, e.g. "telmisartan"
+    drug_class: Optional[str] = None
     evidence: str = ""
 
 

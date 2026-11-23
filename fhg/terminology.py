@@ -207,6 +207,7 @@ LOINC_TO_OBSERVATION: dict[str, str] = {
     "62238-1": "egfr",
     "1989-3": "vitamin_d",
     "2132-9": "vitamin_b12",
+    "8280-0": "waist_circumference",
 }
 BP_PANEL_CODES = {"85354-9", "55284-4"}
 
@@ -228,6 +229,7 @@ OBSERVATION_TO_LOINC: dict[str, tuple[str, str]] = {
     "egfr": ("33914-3", "Estimated GFR"),
     "vitamin_d": ("1989-3", "Vitamin D (25-hydroxy)"),
     "vitamin_b12": ("2132-9", "Vitamin B12"),
+    "waist_circumference": ("8280-0", "Waist circumference"),
 }
 
 OBSERVATION_ALIASES: dict[str, str] = {

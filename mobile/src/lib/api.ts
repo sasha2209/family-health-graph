@@ -12,6 +12,7 @@ import type {
   DocumentSaveBody,
   DocumentSummary,
   CreatedInvite,
+  Activity,
   Connection,
   Grant,
   OAuthRequestInfo,
@@ -91,6 +92,8 @@ export function createApi(token: string | null) {
   return {
     profile: (includeLinked = true) =>
       authed<Profile>(`/v1/profile${includeLinked ? '?include_linked=true' : ''}`),
+    setLifestyle: (body: { activity?: Activity; waist_cm?: number }) =>
+      authed<Profile>('/v1/profile/lifestyle', { method: 'PUT', body }),
     setDemographics: (body: { sex?: Sex; birth_date?: string }) =>
       authed<Profile>('/v1/profile/demographics', { method: 'PUT', body }),
     insights: () => authed<InsightReport>('/v1/insights'),

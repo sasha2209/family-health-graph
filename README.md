@@ -127,6 +127,7 @@ Design principles:
 | `GET /v1/connections` · `POST /v1/connect/smart` · `POST /v1/connections/{id}/sync` · `DELETE /v1/connections/{id}` | Connect a hospital patient portal (SMART on FHIR) and import records; FHIR record files (e.g. from ABHA) can be uploaded as documents |
 | `GET /oauth/authorize` · `POST /oauth/token` · `GET /fhir/r4/{FamilyMemberHistory,RiskAssessment,…}` | **Connect with Family Health Graph**: partners read a person's family history with their consent (OAuth + PKCE, FHIR R4). See [docs/FAMILY_HISTORY_API.md](docs/FAMILY_HISTORY_API.md) |
 | `GET /v1/grants` · `DELETE /v1/grants/{id}` | Apps with access to your record; remove one |
+| `PUT /v1/profile/lifestyle` | Physical activity and waist size, for the Indian Diabetes Risk Score |
 | `GET /v1/trends[?member_id=]` | Each test over time, placed in guideline ranges (BMI uses Asian cut-offs) |
 | `POST /v1/documents` · `POST /v1/documents/{id}/save` · `GET /v1/documents[/{id}[/file]]` · `DELETE /v1/documents/{id}` | Upload a photo/PDF, review what was read, save it to your record or a relative's |
 | `POST /v1/family` · `DELETE /v1/family/{id}` · `POST /v1/observations` | Manual entry |

@@ -10,7 +10,7 @@ import { useAppLock } from '../../lib/appLock';
 import { enablePush, pushSupport } from '../../lib/push';
 import { useSession } from '../../lib/session';
 import { usePalette } from '../../lib/theme';
-import type { Sex } from '../../lib/types';
+import type { Activity, Sex } from '../../lib/types';
 import { useLoader } from '../../lib/useLoader';
 
 const AI_SCOPE = 'ai_summary';
@@ -49,6 +49,8 @@ export default function SettingsScreen() {
              aiDocs: consents.consents.some((x) => x.scope === AI_DOCS_SCOPE && x.active) };
   });
   const [birth, setBirth] = useState<string | null>(null);
+  const [waist, setWaist] = useState('');
+  const [riskMsg, setRiskMsg] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
   if (!data) return <Screen>{error ? <ErrorText>{error}</ErrorText> : <Loading />}</Screen>;
@@ -164,6 +166,30 @@ export default function SettingsScreen() {
           }} />
         </View>
         {msg && <Body muted style={{ marginTop: 6 }}>{msg}</Body>}
+      </Card>
+
+      <Card>
+        <H2>Diabetes risk check</H2>
+        <Body muted>
+          Two questions for the Indian Diabetes Risk Score, a check developed for Indian adults. It also uses your age
+          and whether your parents have diabetes.
+        </Body>
+        <Chips<Activity> label="Physical activity" value={(profile.activity ?? '') as Activity}
+          options={[
+            { value: 'exercise_and_active_work', label: 'Exercise and an active day' },
+            { value: 'exercise_or_active_work', label: 'One of the two' },
+            { value: 'sedentary', label: 'Neither: mostly sitting' },
+          ]}
+          onChange={async (activity) => { await api.setLifestyle({ activity }); setRiskMsg('Saved.'); reload(); }} />
+        <Field label="Waist, measured at the navel (cm)" value={waist} onChangeText={setWaist} keyboardType="decimal-pad"
+               placeholder="e.g. 88" maxLength={5} />
+        <View style={styles.row}>
+          <Button title="Save waist" disabled={!/^\d{2,3}(\.\d)?$/.test(waist)} onPress={async () => {
+            try { await api.setLifestyle({ waist_cm: Number(waist) }); setWaist(''); setRiskMsg('Saved. Your score is on Home.'); reload(); }
+            catch (e) { setRiskMsg(e instanceof Error ? e.message : String(e)); }
+          }} />
+        </View>
+        {riskMsg && <Body muted style={{ marginTop: 6 }}>{riskMsg}</Body>}
       </Card>
 
       <Card>

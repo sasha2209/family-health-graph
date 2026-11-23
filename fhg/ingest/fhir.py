@@ -294,8 +294,9 @@ def to_fhir_bundle(profile: HealthProfile, categories: Optional[set[str]] = None
 
     if "medications" in categories:
         for m in profile.medications:
+            text = m.name if not m.generic or m.generic.lower() in m.name.lower() else f"{m.name} ({m.generic})"
             res = {"resourceType": "MedicationStatement", "status": m.status, "subject": subject,
-                   "medicationCodeableConcept": {"text": m.name}}
+                   "medicationCodeableConcept": {"text": text}}
             if m.dosage:
                 res["dosage"] = [{"text": m.dosage}]
             if m.prescribed_on:
