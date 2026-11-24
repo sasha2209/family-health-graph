@@ -1618,8 +1618,10 @@ def create_app(settings: Optional[Settings] = None,
         for _, p, _ in rows:
             store.audit(p["user_id"], f"org:{org_id}", "clinic.viewed_list", {"org": org["name"]})
         worklist = clinic.sort_worklist([r for r, _, _ in rows])
+        refs = org_referrals(org_id)
         return {"org": org_public(org, store.staff_role(org_id, user_id), request),
-                "impact": clinic.impact(worklist, org_referrals(org_id)), "patients": worklist}
+                "impact": clinic.impact(worklist, refs), "attention": clinic.attention(worklist, refs),
+                "patients": worklist}
 
     @app.post("/v1/orgs/{org_id}/patients/{patient_ref}/referrals")
     def update_referral(org_id: str, patient_ref: str, body: ReferralIn,
@@ -1798,6 +1800,7 @@ def create_app(settings: Optional[Settings] = None,
         for fam, uid in zip(practice.FAMILIES, patients[1:]):
             for rule_id, status in fam.referrals.items():
                 store.set_referral_status(org["id"], uid, rule_id, status, coordinator, None)
+            store.backdate_practice(org["id"], uid, fam.days_ago)
         store.audit("admin", "admin", "practice_clinic.created", {"org_id": org["id"]})
         return {"id": org["id"], "name": org["name"], "staff_code": org["staff_code"], "lang": body.lang,
                 "patients": len(practice.FAMILIES)}

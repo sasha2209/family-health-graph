@@ -40,7 +40,8 @@ useful family record, that it surfaces things worth acting on, and that people a
 From the console's **Pilot report** and the portal's **funnel**:
 - New families this week, and the share who added relatives (target: most) and three generations.
 - Families with something to act on: has the clinic lead seen each one?
-- Tests booked vs completed; referrals stuck at "referred" for more than two weeks.
+- Tests booked vs completed; referrals stuck at "referred" for more than two weeks (pilot report, and each clinic's
+  **Needs attention** list in the portal, which also shows "discuss soon" patients with no decision after a week).
 - Doses taken, for families using caregiver mode.
 - Open concerns (none overdue), job health (all green).
 

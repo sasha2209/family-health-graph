@@ -16,7 +16,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 from collections import Counter
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from statistics import median
 from typing import Optional
 
@@ -42,6 +42,10 @@ REACHED = {  # statuses that count as having reached each funnel stage
     "scheduled": {"scheduled", "completed"},
     "completed": {"completed"},
 }
+# "Needs attention": work that has waited longer than this (docs/PILOT.md, weekly review).
+UNACTED_DAYS = 7        # flagged to discuss soon, and nobody has decided anything
+REFERRED_DAYS = 14      # referred, and nothing has happened since
+SCHEDULED_DAYS = 30     # scheduled, and not marked done
 CORE_RELATIVES = {"mother", "father"}
 GRANDPARENTS = {"maternal_grandmother", "maternal_grandfather", "paternal_grandmother", "paternal_grandfather",
                 "grandmother", "grandfather"}
@@ -151,4 +155,48 @@ def impact(rows: list[dict], referrals: Optional[list[dict]] = None) -> dict:
         "referrals_made": sum(1 for r in referrals if r["status"] in REACHED["referred"]),
         "referrals_completed": sum(1 for r in referrals if r["status"] == "completed"),
         "funnel": funnel(rows, referrals),
+    }
+
+
+def _days_since(iso: str, now: datetime) -> int:
+    then = datetime.fromisoformat(iso)
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    return (now - then).days
+
+
+def attention(rows: list[dict], referrals: list[dict], now: Optional[datetime] = None) -> list[dict]:
+    """What has waited too long, oldest first: patients flagged to discuss soon with no decision after
+    UNACTED_DAYS, referrals with no news after REFERRED_DAYS, and scheduled ones not done after SCHEDULED_DAYS."""
+    now = now or datetime.now(timezone.utc)
+    names = {r["patient_ref"]: r["display_name"] for r in rows}
+    out = []
+    for row in rows:
+        waited = _days_since(row["connected_at"], now)
+        for f in row["flags"]:
+            if f["level"] == "high" and f["referral"] == "identified" and waited >= UNACTED_DAYS:
+                out.append({"patient_ref": row["patient_ref"], "display_name": row["display_name"],
+                            "rule_id": f["rule_id"], "program": f["program"], "status": "identified",
+                            "days": waited, "reason": "Discuss soon, and no decision yet"})
+    for r in referrals:
+        limit = {"referred": REFERRED_DAYS, "scheduled": SCHEDULED_DAYS}.get(r["status"])
+        if limit is None or r["user_ref"] not in names:
+            continue
+        waited = _days_since(r["updated_at"], now)
+        if waited >= limit:
+            out.append({"patient_ref": r["user_ref"], "display_name": names[r["user_ref"]], "rule_id": r["rule_id"],
+                        "program": PROGRAMS.get(r["rule_id"], r["rule_id"]), "status": r["status"], "days": waited,
+                        "reason": "Referred, no update since" if r["status"] == "referred"
+                        else "Scheduled, not marked done"})
+    return sorted(out, key=lambda a: -a["days"])
+
+
+def stuck_referrals(referrals: list[dict], now: Optional[datetime] = None) -> dict:
+    """Counts for the pilot report, across clinics."""
+    now = now or datetime.now(timezone.utc)
+    return {
+        "referred_no_update_14_days": sum(1 for r in referrals if r["status"] == "referred"
+                                          and _days_since(r["updated_at"], now) >= REFERRED_DAYS),
+        "scheduled_not_done_30_days": sum(1 for r in referrals if r["status"] == "scheduled"
+                                          and _days_since(r["updated_at"], now) >= SCHEDULED_DAYS),
     }

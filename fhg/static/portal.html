@@ -43,6 +43,9 @@
   .intake-url { font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
   .code { font: 600 18px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em; background: var(--accent-soft); color: var(--accent); padding: 8px 12px; border-radius: 8px; display: inline-block; }
   .table-wrap { overflow-x: auto; }
+  .num { text-align: right; }
+  #attention a { color: var(--accent); font-weight: 600; }
+  tr.flash td { background: var(--mod-bg); transition: background .6s; }
   table { width: 100%; border-collapse: collapse; min-width: 620px; }
   td.act { white-space: nowrap; width: 1%; }
   td.who { min-width: 150px; }
@@ -95,6 +98,13 @@
       <b>Practice clinic.</b> These patients are made up, for training. Try anything: open a summary, set a referral,
       watch the funnel. Nothing here reaches a real patient or partner.</div>
     <div class="tiles" id="tiles"></div>
+    <div id="attention-card" class="card hidden">
+      <h2 style="margin-top:0">Needs attention</h2>
+      <p class="muted" style="margin-top:0">Waiting longer than it should: flagged to discuss soon with no decision after 7 days,
+        referred with no update after 14, scheduled and not done after 30. Set the status in the worklist to clear an item.</p>
+      <div class="table-wrap"><table><thead><tr><th>Patient</th><th>Care program</th><th>Why</th><th class="num">Days</th></tr></thead>
+        <tbody id="attention"></tbody></table></div>
+    </div>
     <div class="split">
       <div class="card">
         <div class="row" style="justify-content:space-between; margin-bottom:8px">
@@ -185,6 +195,10 @@ async function loadOrg() {
   show("staff-box", !!org.staff_code); $("staff-code-out").textContent = org.staff_code || "";
   show("lang-box", org.role === "admin"); $("org-lang").value = org.lang || "hi";
   show("practice-banner", !!org.practice);
+  const att = data.attention || [];
+  show("attention-card", att.length > 0);
+  $("attention").innerHTML = att.map((a) => `<tr><td><a href="#" data-goto="${esc(a.patient_ref)}">${esc(a.display_name)}</a></td>
+    <td>${esc(a.program)}</td><td>${esc(a.reason)}</td><td class="num"><b>${esc(a.days)}</b></td></tr>`).join("");
   $("tiles").innerHTML = [
     [im.patients_connected, "Patients connected"],
     [im.patients_with_high_priority, "Worth discussing soon"],
@@ -261,6 +275,16 @@ $("join-org").onclick = async () => {
 };
 $("org-select").onchange = (e) => { orgId = e.target.value; loadOrg(); };
 $("filter").onchange = renderRows;
+// "Needs attention" → that patient's row in the worklist.
+$("attention").onclick = (e) => {
+  const a = e.target.closest("[data-goto]"); if (!a) return;
+  e.preventDefault();
+  if ($("filter").value) { $("filter").value = ""; renderRows(); }
+  const row = document.querySelector(`#rows [data-ref="${CSS.escape(a.dataset.goto)}"]`)?.closest("tr");
+  if (!row) return;
+  row.scrollIntoView({ behavior: "smooth", block: "center" });
+  row.classList.add("flash"); setTimeout(() => row.classList.remove("flash"), 1600);
+};
 $("copy-link").onclick = async () => {
   try { await navigator.clipboard.writeText(data.org.intake_url); status("Intake link copied."); }
   catch (e) { status("Copy failed. Select the link and copy it manually."); }

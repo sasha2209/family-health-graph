@@ -26,6 +26,8 @@ class PracticeFamily:
     labs: dict[str, float] = field(default_factory=dict)
     referrals: dict[str, str] = field(default_factory=dict)        # rule_id → status
     activity: Optional[str] = None
+    days_ago: int = 3                       # when they connected and their referrals last changed: some have waited
+                                            # long enough to show under "Needs attention"
 
 
 UNITS = {"ldl_cholesterol": "mg/dL", "hba1c": "%", "bmi": "kg/m2", "systolic_bp": "mmHg", "diastolic_bp": "mmHg",
@@ -35,11 +37,11 @@ UNITS = {"ldl_cholesterol": "mg/dL", "hba1c": "%", "bmi": "kg/m2", "systolic_bp"
 FAMILIES = [
     PracticeFamily("Sunita Kulkarni", Sex.FEMALE, 1978,
                    [(R.MOTHER, [("breast_cancer", 44)]), (R.MATERNAL_AUNT, [("ovarian_cancer", 58)])],
-                   referrals={"hboc_family_pattern": "referred"}),
+                   referrals={"hboc_family_pattern": "referred"}, days_ago=20),
     PracticeFamily("Rajesh Deshpande", Sex.MALE, 1975,
                    [(R.FATHER, [("colorectal_cancer", 48)]), (R.PATERNAL_GRANDFATHER, [("colorectal_cancer", 70)]),
                     (R.PATERNAL_AUNT, [("endometrial_cancer", 45)])],
-                   referrals={"lynch_criteria": "scheduled"}),
+                   referrals={"lynch_criteria": "scheduled"}, days_ago=40),
     PracticeFamily("Meera Joshi", Sex.FEMALE, 1985, [(R.FATHER, [("familial_hypercholesterolemia", 38)])],
                    labs={"ldl_cholesterol": 205}, referrals={"familial_hypercholesterolemia": "completed"}),
     PracticeFamily("Anil Patil", Sex.MALE, 1970,
@@ -63,7 +65,7 @@ FAMILIES = [
     PracticeFamily("Rohan Kadam", Sex.MALE, 1987, [(R.MOTHER, [("colorectal_cancer", 55)])],
                    referrals={"colorectal_family_history": "scheduled"}),
     PracticeFamily("Lata Wagh", Sex.FEMALE, 1958, [(R.MOTHER, [("type_2_diabetes", 55)])],
-                   labs={"hba1c": 7.1, "systolic_bp": 150, "diastolic_bp": 95}),
+                   labs={"hba1c": 7.1, "systolic_bp": 150, "diastolic_bp": 95}, days_ago=12),
     PracticeFamily("Ashwini Bhosale", Sex.FEMALE, 1988, [(R.MOTHER, [("hypertension", 60)])]),
     PracticeFamily("Neha Jadhav", Sex.FEMALE, 1995, [(R.MATERNAL_GRANDMOTHER, [("dementia", 78)])]),
 ]
