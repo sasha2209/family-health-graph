@@ -31,7 +31,14 @@ PUSH_TEXT = {
     "documents_received": "Your forwarded documents are ready to review.",
     "booking": "There's an update on your test booking.",
     "reminder": "A health check is still due. Open the app to book it.",
+    "care": "An update about someone you care for.",
+    "risk": "Your genetic counselor shared your results.",
+    "privacy": "There's an answer to your privacy question.",
+    "security": "Important security notice about your account.",
 }
+# Where tapping the notification opens. Pushes never carry health details (they show on lock screens).
+PUSH_URL = {"booking": "/", "reminder": "/", "documents_received": "/", "care": "/", "risk": "/",
+            "privacy": "/privacy", "security": "/"}
 DEFAULT_TEXT = "You have a new update."
 
 
@@ -109,19 +116,20 @@ class Notifier:
         self.sender = sender
         self._pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="push") if background else None
 
-    def notify(self, user_id: str, kind: str, message: str) -> None:
+    def notify(self, user_id: str, kind: str, message: str, url: Optional[str] = None) -> None:
         self.store.notify(user_id, kind, message)
         tokens = self.store.push_tokens_for(user_id)
         if not tokens:
             return
+        target = url or PUSH_URL.get(kind, "/")
         if self._pool:
-            self._pool.submit(self._push, tokens, kind)  # don't make the request wait on Expo
+            self._pool.submit(self._push, tokens, kind, target)  # don't make the request wait on Expo
         else:
-            self._push(tokens, kind)
+            self._push(tokens, kind, target)
 
-    def _push(self, tokens: list[str], kind: str) -> None:
+    def _push(self, tokens: list[str], kind: str, url: str = "/") -> None:
         body = PUSH_TEXT.get(kind, DEFAULT_TEXT)
-        messages = [PushMessage(t, TITLE, body, {"kind": kind, "url": "/"}) for t in tokens]
+        messages = [PushMessage(t, TITLE, body, {"kind": kind, "url": url}) for t in tokens]
         try:
             invalid = self.sender.send(messages)
             if invalid:

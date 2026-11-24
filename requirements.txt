@@ -7,6 +7,8 @@ segno>=1.6          # QR codes for clinic intake links (pure Python)          # 
 pypdf>=4           # read text from uploaded PDFs
 pillow>=10         # prepare photos for OCR (Tesseract itself is a system package)
 anthropic>=0.40   # optional: AI summaries and the document-reading fallback
+sentry-sdk>=3,<4  # optional: error tracking with health data scrubbed (FHG_SENTRY_DSN)
+boto3>=1.34       # optional: off-site backups to S3-compatible storage (FHG_BACKUP_S3_BUCKET)
 # dev
 pytest>=8
 httpx>=0.27

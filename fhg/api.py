@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
-from . import auth, bookings, care, clinic, emergency, i18n, privacy, inbound, partners, push, risk_models, trends
+from . import auth, backup as backups, bookings, care, clinic, emergency, i18n, monitoring, privacy, inbound, partners, push, risk_models, trends
 from .connectors import abdm, smart
 from . import partner_oauth as poauth
 from .clinician_report import render_html as clinician_report_html
@@ -39,6 +39,7 @@ from .merge import find_match, merge_into
 from .models import CareInfo, Condition, FamilyMember, HealthProfile, Medication, Observation, Relationship, Sex
 from .security import constant_time_equals, hash_token, load_cipher, pseudonym
 from .sharing import CONSENT_AI_DOCS, CONSENT_LLM, CONSENT_WA_SUMMARIES, CONSENT_RESEARCH, PARTNERS, deidentify, partner_payload, share_scope
+from .scheduler import Job, Scheduler
 from .storage import Store
 from .terminology import CONCEPTS_BY_CATEGORY as _CONCEPTS, OBSERVATION_ALIASES, OBSERVATION_TO_LOINC, category_from_text
 
@@ -91,6 +92,13 @@ class Settings:
     grievance_officer_name: Optional[str] = None
     grievance_officer_email: Optional[str] = None
     grievance_days: int = 30
+    # Running a pilot (docs/RUNNING_IN_PRODUCTION.md): background jobs, backups, error tracking.
+    scheduler: bool = False
+    backup_dir: Optional[str] = None
+    backup_keep: int = 14
+    backup_key: Optional[str] = None
+    sentry_dsn: Optional[str] = None
+    environment: str = "development"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -122,6 +130,12 @@ class Settings:
             grievance_officer_name=os.environ.get("FHG_GRIEVANCE_OFFICER_NAME") or None,
             grievance_officer_email=os.environ.get("FHG_GRIEVANCE_OFFICER_EMAIL") or None,
             grievance_days=int(os.environ.get("FHG_GRIEVANCE_DAYS") or cls.grievance_days),
+            scheduler=os.environ.get("FHG_SCHEDULER", "").lower() in ("1", "on", "true", "yes"),
+            backup_dir=os.environ.get("FHG_BACKUP_DIR") or None,
+            backup_keep=int(os.environ.get("FHG_BACKUP_KEEP") or cls.backup_keep),
+            backup_key=os.environ.get("FHG_BACKUP_KEY") or None,
+            sentry_dsn=os.environ.get("FHG_SENTRY_DSN") or None,
+            environment=os.environ.get("FHG_ENVIRONMENT") or cls.environment,
             ios_app_ids=_csv("FHG_IOS_APP_IDS"),
             android_package=os.environ.get("FHG_ANDROID_PACKAGE") or None,
             android_cert_sha256=_csv("FHG_ANDROID_CERT_SHA256"),
@@ -463,6 +477,7 @@ def create_app(settings: Optional[Settings] = None,
     email_sender = email_sender or auth.email_sender_from_env()
     if settings.auth_secret == Settings.auth_secret:
         log.warning("FHG_AUTH_SECRET is not set; using a development value. Do not use this in production.")
+    monitoring.init(settings.sentry_dsn, settings.environment, os.environ.get("RENDER_GIT_COMMIT"))
     store = Store(settings.db_path, load_cipher(settings.encryption_key, Path(settings.key_file)))
     app = FastAPI(
         title="Family Health Graph",
@@ -587,6 +602,26 @@ def create_app(settings: Optional[Settings] = None,
     @app.get("/health")
     def health() -> dict:
         return {"status": "ok"}
+
+    @app.get("/health/ready")
+    def health_ready() -> JSONResponse:
+        """For uptime monitors: the database takes writes and the background jobs are running on time."""
+        problems = []
+        try:
+            store.writable()
+        except Exception:  # noqa: BLE001 (report, don't crash the probe)
+            problems.append("database not writable")
+        if settings.scheduler:
+            now = datetime.now(timezone.utc)
+            for name, limit in (("care", timedelta(hours=2)), ("reminders", timedelta(hours=26)),
+                                ("backup", timedelta(hours=26)), ("housekeeping", timedelta(hours=26))):
+                run = store.job_run(name)
+                if run and run["status"] == "error":
+                    problems.append(f"{name} job failed")
+                elif run and now - datetime.fromisoformat(run["last_run_at"]) > limit:
+                    problems.append(f"{name} job overdue")
+        return JSONResponse({"status": "ok" if not problems else "degraded", "problems": problems},
+                            status_code=200 if not problems else 503)
 
     # --- accounts --------------------------------------------------------------
     @app.post("/v1/users", status_code=201)
@@ -2768,9 +2803,34 @@ def create_app(settings: Optional[Settings] = None,
                 if key in done:
                     continue
                 for uid in {owner_id, *(c["user_id"] for c in store.caregivers(owner_id, member_id))}:
-                    notifier.notify(uid, "care", message)
+                    notifier.notify(uid, "care", message, url=f"/care?id={owner_id}.{member_id}")
                     sent += 1
                 store.record_nudge(owner_id, key, now.isoformat())
         return {"sent": sent}
+
+    # --- background jobs (docs/RUNNING_IN_PRODUCTION.md) ----------------------------------------
+    def run_backup() -> dict:
+        if not settings.backup_dir:
+            return {"skipped": "FHG_BACKUP_DIR is not set"}
+        key = settings.backup_key or store._cipher.key.decode()
+        return store.backup(settings.backup_dir, key, settings.backup_keep, backups.s3_uploader_from_env())
+
+    jobs = [Job("care", run_care_alerts, hourly=True), Job("reminders", run_reminders, at=(10, 0)),
+            Job("backup", run_backup, at=(2, 30), first_run_now=True), Job("housekeeping", run_housekeeping, at=(3, 15))]
+    app.state.scheduler = Scheduler(store, jobs)
+    if settings.scheduler:
+        app.router.on_startup.append(app.state.scheduler.start)
+        app.router.on_shutdown.append(app.state.scheduler.stop)
+
+    @app.post("/admin/tasks/backup", dependencies=[Depends(require_admin)])
+    def admin_backup() -> dict:
+        """Make a backup now (also runs nightly when the scheduler is on)."""
+        out = run_backup()
+        store.record_job_run("backup", datetime.now(timezone.utc).isoformat(), "ok", out)
+        return out
+
+    @app.get("/admin/jobs", dependencies=[Depends(require_admin)])
+    def admin_jobs() -> dict:
+        return {"scheduler": settings.scheduler, "jobs": [r for r in store.job_runs() if not r["name"].startswith("_")]}
 
     return app

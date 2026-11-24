@@ -24,6 +24,7 @@ class FieldCipher:
 
     def __init__(self, key: bytes):
         self._fernet = Fernet(key)
+        self.key = key  # the Fernet key in use (also the default backup key)
 
     def encrypt(self, plaintext: str) -> bytes:
         return self._fernet.encrypt(plaintext.encode("utf-8"))
