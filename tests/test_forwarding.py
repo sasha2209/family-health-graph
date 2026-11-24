@@ -30,6 +30,10 @@ class FakeWhatsApp:
     def send_text(self, to, body):
         self.sent.append((to, body))
 
+    def send_template(self, to, name, lang, params):
+        self.templates = getattr(self, "templates", [])
+        self.templates.append((to, name, lang, params))
+
 
 @pytest.fixture
 def wa():

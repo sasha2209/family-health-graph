@@ -37,6 +37,7 @@ export default function CareScreen() {
   const [allergies, setAllergies] = useState('');
   const [stockFor, setStockFor] = useState<{ id: string; value: string } | null>(null);
   const [shown, setShown] = useState<string | null>(null);
+  const [waForm, setWaForm] = useState<{ phone: string; lang: 'en' | 'hi'; agreed: boolean } | null>(null);
 
   if (!data) return <Screen>{error ? <ErrorText>{error}</ErrorText> : <Loading />}</Screen>;
   const d: CareDetail = { ...data, name: data.has_name ? data.name : capitalize(t(label(data.relationship_code))) };
@@ -263,6 +264,41 @@ export default function CareScreen() {
                    onPress={() => run(() => api.careRevokeLink(id, l.id))} last={i === d.emergency_links.length - 1} />
             ))}
           </>
+        )}
+      </Section>
+
+      <Section title={t('Reminders on their WhatsApp')}>
+        {waForm ? (
+          <View style={{ padding: 16, gap: 10 }}>
+            <Body muted>{t('For someone who doesn’t use the app. They get each dose time on WhatsApp and reply 1 when they’ve taken their medicines. You see it here.')}</Body>
+            <Field label={t('Their WhatsApp number')} value={waForm.phone} keyboardType="phone-pad" placeholder="+91 98xxx xxxxx"
+                   onChangeText={(v) => setWaForm({ ...waForm, phone: v })} />
+            <Chips label={t('Language for their messages')} options={[{ value: 'hi', label: 'हिन्दी' }, { value: 'en', label: 'English' }]}
+                   value={waForm.lang} onChange={(v) => setWaForm({ ...waForm, lang: v as 'en' | 'hi' })} />
+            <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: waForm.agreed }}
+                       onPress={() => setWaForm({ ...waForm, agreed: !waForm.agreed })}
+                       style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start' }}>
+              <Text style={{ color: c.accent, fontSize: 18 }}>{waForm.agreed ? '☑' : '☐'}</Text>
+              <Body style={{ flex: 1 }}>{t('{name} agreed to get medicine reminders on WhatsApp', { name: d.name })}</Body>
+            </Pressable>
+            <View style={styles.row}>
+              <Button title={t('Send invitation')} variant="primary" disabled={!waForm.agreed || waForm.phone.replace(/\D/g, '').length < 10}
+                      onPress={() => { const body = waForm; setWaForm(null); run(() => api.careWhatsAppOn(id, body)); }} />
+              <Button title={t('Cancel')} onPress={() => setWaForm(null)} />
+            </View>
+          </View>
+        ) : d.whatsapp && d.whatsapp.status !== 'stopped' ? (
+          <>
+            <Row title={d.whatsapp.status === 'active' ? t('On · {phone}', { phone: d.whatsapp.phone })
+                                                       : t('Invited · {phone}', { phone: d.whatsapp.phone })}
+                 detail={d.whatsapp.status === 'active' ? t('They reply 1 when they’ve taken their medicines.')
+                                                        : t('Waiting for them to reply YES on WhatsApp.')} />
+            <Row title={t('Turn off WhatsApp reminders')} onPress={() => run(() => api.careWhatsAppOff(id))} last />
+          </>
+        ) : (
+          <Row title={t('Send reminders to their WhatsApp')}
+               detail={d.whatsapp?.status === 'stopped' ? t('Turned off. Set up again to restart.') : t('For someone who doesn’t use the app')}
+               onPress={() => setWaForm({ phone: '', lang: 'hi', agreed: false })} last />
         )}
       </Section>
 

@@ -339,6 +339,7 @@ export interface CareDetail extends Omit<CareSummary, 'refills_due'> {
   info: CareInfo;
   caregivers: { user_id: string; name: string | null; joined_at: string }[];
   emergency_links: { id: string; expires_at: string; views: number; created_at: string }[];
+  whatsapp: { phone: string; lang: 'en' | 'hi'; status: 'invited' | 'active' | 'stopped'; updated_at: string } | null;
 }
 
 // --- privacy rights (/v1/privacy) -----------------------------------------------------------------

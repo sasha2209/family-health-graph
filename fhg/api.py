@@ -95,6 +95,9 @@ class Settings:
     grievance_officer_email: Optional[str] = None
     grievance_days: int = 30
     # Running a pilot (docs/RUNNING_IN_PRODUCTION.md): background jobs, backups, error tracking.
+    # WhatsApp templates for medicine reminders on a cared-for person's own phone (docs/CAREGIVER_MODE.md).
+    whatsapp_template_care_optin: str = "care_optin"
+    whatsapp_template_care_reminder: str = "medicine_reminder"
     scheduler: bool = False
     backup_dir: Optional[str] = None
     backup_keep: int = 14
@@ -132,6 +135,8 @@ class Settings:
             grievance_officer_name=os.environ.get("FHG_GRIEVANCE_OFFICER_NAME") or None,
             grievance_officer_email=os.environ.get("FHG_GRIEVANCE_OFFICER_EMAIL") or None,
             grievance_days=int(os.environ.get("FHG_GRIEVANCE_DAYS") or cls.grievance_days),
+            whatsapp_template_care_optin=os.environ.get("FHG_WA_TEMPLATE_CARE_OPTIN") or cls.whatsapp_template_care_optin,
+            whatsapp_template_care_reminder=os.environ.get("FHG_WA_TEMPLATE_CARE_REMINDER") or cls.whatsapp_template_care_reminder,
             scheduler=os.environ.get("FHG_SCHEDULER", "").lower() in ("1", "on", "true", "yes"),
             backup_dir=os.environ.get("FHG_BACKUP_DIR") or None,
             backup_keep=int(os.environ.get("FHG_BACKUP_KEEP") or cls.backup_keep),
@@ -386,6 +391,12 @@ class SurveyAnswerIn(BaseModel):
 
 class LanguageIn(BaseModel):
     lang: str = Field(pattern="^(en|hi|bn|ta|te|mr)$")
+
+
+class CareWhatsAppIn(BaseModel):
+    phone: str = Field(min_length=7, max_length=24, description="Their own WhatsApp number")
+    lang: str = Field("en", pattern="^(en|hi)$")
+    agreed: bool = Field(description="They agreed to get reminders on WhatsApp")
 
 
 class EmergencyLinkIn(BaseModel):
@@ -1216,6 +1227,11 @@ def create_app(settings: Optional[Settings] = None,
     def handle_whatsapp(msg: inbound.WhatsAppMessage) -> None:
         key = inbound.phone_key(settings.auth_secret, msg.sender)
         user_id = store.user_for_whatsapp(key)
+        if user_id is None and msg.kind == "text":
+            care_rows = store.care_whatsapp_for_key(key)
+            if care_rows and not re.search(r"\b\d{6}\b", msg.text):
+                handle_care_whatsapp(msg, care_rows)
+                return
         row = store.inbound(user_id) if user_id else {}
         lang = row.get("lang") or i18n.detect_script(msg.text) or "en"
         send = lambda text: wa_client.send_text(msg.sender, text)  # noqa: E731
@@ -2687,11 +2703,17 @@ def create_app(settings: Optional[Settings] = None,
     def member_of(owner_id: str, member_id: str) -> FamilyMember:
         return care_member(owner_id, member_id)
 
+    def care_wa_out(row: Optional[dict]) -> Optional[dict]:
+        if row is None:
+            return None
+        return {"phone": "•••• " + row["phone"][-4:], "lang": row["lang"], "status": row["status"],
+                "updated_at": row["updated_at"]}
+
     def care_out(owner_id: str, member_id: str, role: str, user_id: str) -> dict:
         m = care_member(owner_id, member_id)
         today = datetime.now(care.IST).date()
         log = store.dose_log(owner_id, member_id, (today - timedelta(days=7)).isoformat())
-        names = {owner_id: "Owner"} | {c["user_id"]: c["name"] or "Caregiver" for c in store.caregivers(owner_id, member_id)}
+        names = {owner_id: "Owner", "whatsapp": care_name(m) + " (WhatsApp)"} | {c["user_id"]: c["name"] or "Caregiver" for c in store.caregivers(owner_id, member_id)}
         for e in log:
             e["by_name"] = "you" if e["by_user"] == user_id else names.get(e["by_user"], "someone")
         meds = []
@@ -2712,7 +2734,8 @@ def create_app(settings: Optional[Settings] = None,
                 "member_id": member_id, "today": care.doses_for_day(m, today, log), "week": week,
                 "medications": meds, "info": (m.care or CareInfo()).model_dump(),
                 "caregivers": store.caregivers(owner_id, member_id) if role == "owner" else [],
-                "emergency_links": store.emergency_links(owner_id, member_id)}
+                "emergency_links": store.emergency_links(owner_id, member_id),
+                "whatsapp": care_wa_out(store.care_whatsapp(owner_id, member_id))}
 
     @app.get("/v1/care")
     def care_list(user_id: str = Depends(current_user)) -> list[dict]:
@@ -2879,6 +2902,73 @@ def create_app(settings: Optional[Settings] = None,
             raise HTTPException(404, "No such link")
         return Response(status_code=204)
 
+    @app.put("/v1/care/{care_id}/whatsapp")
+    def care_whatsapp_on(care_id: str, body: CareWhatsAppIn, user_id: str = Depends(current_user)) -> dict:
+        """Send medicine reminders to the cared-for person's own WhatsApp. They get an invitation (an approved
+        template) and only start receiving reminders after replying YES."""
+        owner_id, member_id, role = care_target(user_id, care_id)
+        if not wa_client:
+            raise HTTPException(409, "WhatsApp isn't set up on this server")
+        if not body.agreed:
+            raise HTTPException(422, "Ask them first: reminders only go to people who agreed")
+        try:
+            phone = care.normalize_phone(body.phone)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        try:
+            wa_client.send_template(phone, settings.whatsapp_template_care_optin, body.lang, [])
+        except Exception as exc:  # noqa: BLE001 (report the provider's failure, don't crash)
+            log.warning("WhatsApp invitation failed: %s", exc)
+            raise HTTPException(502, "WhatsApp didn't accept the invitation. Check the number and try again.") from exc
+        store.set_care_whatsapp(owner_id, member_id, inbound.phone_key(settings.auth_secret, phone), phone, body.lang,
+                                "invited", user_id)
+        store.audit(owner_id, user_id if role == "caregiver" else "user", "care.whatsapp_invited", {"member_id": member_id})
+        return care_out(owner_id, member_id, role, user_id)
+
+    @app.delete("/v1/care/{care_id}/whatsapp")
+    def care_whatsapp_off(care_id: str, user_id: str = Depends(current_user)) -> dict:
+        owner_id, member_id, role = care_target(user_id, care_id)
+        if store.care_whatsapp(owner_id, member_id) is None:
+            raise HTTPException(404, "WhatsApp reminders aren't set up for them")
+        store.set_care_whatsapp_status(owner_id, member_id, "stopped")
+        store.audit(owner_id, user_id if role == "caregiver" else "user", "care.whatsapp_stopped", {"member_id": member_id})
+        return care_out(owner_id, member_id, role, user_id)
+
+    def handle_care_whatsapp(msg: inbound.WhatsAppMessage, rows: list[dict]) -> None:
+        """A reply from someone who gets medicine reminders: YES to start, STOP to end, 1 to mark doses taken."""
+        lang = rows[0]["lang"]
+        text = msg.text.strip().lower().rstrip(".!")
+        send = lambda key, **v: wa_client.send_text(msg.sender, care.wa_text(lang, key, **v))  # noqa: E731
+        if text in care.WA_STOP:
+            for r in rows:
+                store.set_care_whatsapp_status(r["owner_id"], r["member_id"], "stopped")
+                store.audit(r["owner_id"], "whatsapp", "care.whatsapp_stopped", {"member_id": r["member_id"]})
+            send("stopped")
+        elif text in care.WA_YES:
+            for r in rows:
+                store.set_care_whatsapp_status(r["owner_id"], r["member_id"], "active")
+                store.audit(r["owner_id"], "whatsapp", "care.whatsapp_active", {"member_id": r["member_id"]})
+            send("active")
+        elif text in care.WA_TAKEN and any(r["status"] == "active" for r in rows):
+            now = datetime.now(timezone.utc)
+            day = now.astimezone(care.IST).date().isoformat()
+            marked = []
+            for r in rows:
+                if r["status"] != "active":
+                    continue
+                member = care_member(r["owner_id"], r["member_id"])
+                log_ = store.dose_log(r["owner_id"], r["member_id"], day)
+                slot = care.latest_open_slot(member, log_, now)
+                if slot is None:
+                    continue
+                for d in care.doses_for_day(member, now.astimezone(care.IST).date(), log_, now):
+                    if d["slot"] == slot and d["status"] in ("due", "missed"):
+                        store.log_dose(r["owner_id"], r["member_id"], d["med_id"], day, slot, "taken", "whatsapp")
+                        marked.append(d["name"])
+            send("taken", names=", ".join(sorted(set(marked)))) if marked else send("nothing_due")
+        else:
+            send("help")
+
     @app.get("/e/{token}", response_class=HTMLResponse, include_in_schema=False)
     def emergency_page(token: str) -> HTMLResponse:
         link = store.open_emergency_link(hash_token(token))
@@ -2902,11 +2992,23 @@ def create_app(settings: Optional[Settings] = None,
         for owner_id, member_id in store.care_targets():
             member = care_member(owner_id, member_id)
             today = now.astimezone(care.IST).date()
-            log = store.dose_log(owner_id, member_id, today.isoformat())
+            doses_log = store.dose_log(owner_id, member_id, today.isoformat())
             done = {n["key"] for n in store.nudges(owner_id)}
             circle = {owner_id, *(c["user_id"] for c in store.caregivers(owner_id, member_id))}
-            by_lang = {lang: dict(care.due_care_alerts(now, care_name_in(member, lang), member, log, lang))
+            by_lang = {lang: dict(care.due_care_alerts(now, care_name_in(member, lang), member, doses_log, lang))
                        for lang in {store.user_lang(uid) for uid in circle}}
+            wa = store.care_whatsapp(owner_id, member_id)
+            if wa_client and wa and wa["status"] == "active":
+                for key, slot, names in care.wa_reminders_due(now, member, doses_log):
+                    if key in done:
+                        continue
+                    try:
+                        wa_client.send_template(wa["phone"], settings.whatsapp_template_care_reminder, wa["lang"],
+                                                [care.WA_SLOT.get(wa["lang"], care.WA_SLOT["en"])[slot], ", ".join(names)])
+                        store.record_nudge(owner_id, key, now.isoformat())
+                        sent += 1
+                    except Exception:  # noqa: BLE001 (one failed send mustn't stop the job)
+                        log.exception("WhatsApp medicine reminder failed")
             for key in next(iter(by_lang.values())):
                 if key in done:
                     continue

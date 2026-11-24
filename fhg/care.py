@@ -186,3 +186,61 @@ def due_care_alerts(now: datetime, who: str, member: FamilyMember, log: list[dic
                 key = "refill_today" if r["days_left"] == 0 else "refill_1" if r["days_left"] == 1 else "refill_n"
                 out.append((f"refill:{med.id}:{today}", tx[key].format(who=who, med=med.name, n=r["days_left"])))
     return out
+
+
+# --- reminders on the cared-for person's own WhatsApp ----------------------------------------------
+# Business-initiated WhatsApp messages must use templates Meta has approved (docs/CAREGIVER_MODE.md lists their
+# text). Replies within 24 hours of the person writing can be free text: these.
+WA_TEXT = {
+    "en": {"active": "You'll get your medicine reminders here. Reply 1 when you've taken them, or STOP to end them.",
+           "stopped": "Medicine reminders are off. Your family can turn them on again in the app.",
+           "taken": "Marked as taken: {names}. Thank you!",
+           "nothing_due": "There's nothing to mark right now. Your next reminder will come at the usual time.",
+           "help": "Reply 1 when you've taken your medicines, or STOP to end the reminders."},
+    "hi": {"active": "आपको दवा के रिमाइंडर यहीं मिलेंगे। दवा लेने के बाद 1 भेजें, या बंद करने के लिए STOP भेजें।",
+           "stopped": "दवा के रिमाइंडर बंद हैं। आपका परिवार ऐप में इन्हें फिर से चालू कर सकता है।",
+           "taken": "ली गई दर्ज की गई: {names}। धन्यवाद!",
+           "nothing_due": "अभी दर्ज करने के लिए कुछ नहीं है। अगला रिमाइंडर हमेशा के समय पर आएगा।",
+           "help": "दवा लेने के बाद 1 भेजें, या रिमाइंडर बंद करने के लिए STOP भेजें।"},
+}
+WA_SLOT = {"en": {"morning": "morning", "afternoon": "afternoon", "night": "night"},
+           "hi": {"morning": "सुबह", "afternoon": "दोपहर", "night": "रात"}}
+WA_YES = {"yes", "y", "ha", "haan", "han", "हाँ", "हां", "ok", "start"}
+WA_STOP = {"stop", "रोको", "बंद", "band", "no", "nahi", "नहीं"}
+WA_TAKEN = {"1", "taken", "done", "le li", "le liya", "ले ली", "ले लिया", "li", "ली", "ho gaya", "हो गया"}
+
+
+def wa_text(lang: str, key: str, **values) -> str:
+    return WA_TEXT.get(lang, WA_TEXT["en"])[key].format(**values)
+
+
+def normalize_phone(raw: str) -> str:
+    """Digits with country code; a 10-digit number is taken as Indian. Raises ValueError if it can't be a number."""
+    digits = re.sub(r"\D", "", raw)
+    if len(digits) == 11 and digits.startswith("0"):
+        digits = digits[1:]
+    if len(digits) == 10:
+        digits = "91" + digits
+    if not 11 <= len(digits) <= 15:
+        raise ValueError("Enter a WhatsApp number with its country code, like +91 98123 45678")
+    return digits
+
+
+def latest_open_slot(member: FamilyMember, log: list[dict], now: datetime) -> Optional[str]:
+    """The most recent slot today with doses not yet marked: what a reply of "1" refers to."""
+    doses = doses_for_day(member, now.astimezone(IST).date(), log, now)
+    open_slots = [d["slot"] for d in doses if d["status"] in ("due", "missed")]
+    return open_slots[-1] if open_slots else None
+
+
+def wa_reminders_due(now: datetime, member: FamilyMember, log: list[dict]) -> list[tuple[str, str, list[str]]]:
+    """[(dedupe key, slot, medicine names)] to send to the person's own WhatsApp in this hour."""
+    now = now.astimezone(IST)
+    today = now.date()
+    out = []
+    doses = doses_for_day(member, today, log, now)
+    for slot in SLOTS:
+        due = [d for d in doses if d["slot"] == slot and d["status"] == "due"]
+        if due and now.hour == SLOT_HOUR[slot]:
+            out.append((f"wa:{member.id}:{today}:{slot}", slot, sorted({d["name"] for d in due})))
+    return out

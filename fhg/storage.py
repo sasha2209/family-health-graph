@@ -324,6 +324,19 @@ CREATE TABLE IF NOT EXISTS survey_answers (
     answered_at TEXT NOT NULL,
     PRIMARY KEY (user_id, question)
 );
+-- Medicine reminders sent to the cared-for person's own WhatsApp (they opt in by replying YES).
+CREATE TABLE IF NOT EXISTS care_whatsapp (
+    owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    member_id TEXT NOT NULL,
+    phone_key TEXT NOT NULL,          -- keyed hash of the number, for routing replies
+    phone BLOB NOT NULL,              -- encrypted
+    lang TEXT NOT NULL,
+    status TEXT NOT NULL,             -- invited | active | stopped
+    set_by TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (owner_id, member_id)
+);
+CREATE INDEX IF NOT EXISTS idx_care_whatsapp_key ON care_whatsapp(phone_key);
 CREATE TABLE IF NOT EXISTS nudges (
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     key TEXT NOT NULL,
@@ -906,9 +919,33 @@ class Store:
         return bool(self._query("SELECT 1 FROM care_circle WHERE owner_id = ? AND member_id = ? AND caregiver_id = ?",
                                 (owner_id, member_id, user_id)))
 
+    def set_care_whatsapp(self, owner_id: str, member_id: str, phone_key: str, phone: str, lang: str, status: str,
+                          set_by: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("INSERT OR REPLACE INTO care_whatsapp VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                               (owner_id, member_id, phone_key, self._cipher.encrypt(phone), lang, status, set_by, _now()))
+
+    def set_care_whatsapp_status(self, owner_id: str, member_id: str, status: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE care_whatsapp SET status = ?, updated_at = ? WHERE owner_id = ? AND member_id = ?",
+                               (status, _now(), owner_id, member_id))
+
+    def _care_wa(self, r: sqlite3.Row) -> dict:
+        return {"owner_id": r["owner_id"], "member_id": r["member_id"], "phone": self._cipher.decrypt(r["phone"]),
+                "lang": r["lang"], "status": r["status"], "updated_at": r["updated_at"]}
+
+    def care_whatsapp(self, owner_id: str, member_id: str) -> Optional[dict]:
+        rows = self._query("SELECT * FROM care_whatsapp WHERE owner_id = ? AND member_id = ?", (owner_id, member_id))
+        return self._care_wa(rows[0]) if rows else None
+
+    def care_whatsapp_for_key(self, phone_key: str) -> list[dict]:
+        """Everyone this number gets reminders for (one person, or a parent looked after by two families)."""
+        return [self._care_wa(r) for r in self._query("SELECT * FROM care_whatsapp WHERE phone_key = ? AND status != 'stopped'",
+                                                      (phone_key,))]
+
     def drop_care_for_member(self, owner_id: str, member_id: str) -> None:
         with self._lock, self._conn:
-            for table in ("care_circle", "care_invites", "dose_log", "emergency_links"):
+            for table in ("care_circle", "care_invites", "dose_log", "emergency_links", "care_whatsapp"):
                 self._conn.execute(f"DELETE FROM {table} WHERE owner_id = ? AND member_id = ?", (owner_id, member_id))
 
     def create_care_invite(self, token_hash: str, owner_id: str, member_id: str, expires_at: str) -> None:

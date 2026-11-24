@@ -177,6 +177,9 @@ export function createApi(token: string | null) {
     careEmergencyLink: (id: string, hours: number) =>
       authed<{ id: string; url: string; expires_at: string }>(`/v1/care/${encodeURIComponent(id)}/emergency-links`,
         { method: 'POST', body: { hours } }),
+    careWhatsAppOn: (id: string, body: { phone: string; lang: 'en' | 'hi'; agreed: boolean }) =>
+      authed<CareDetail>(`/v1/care/${encodeURIComponent(id)}/whatsapp`, { method: 'PUT', body }),
+    careWhatsAppOff: (id: string) => authed<CareDetail>(`/v1/care/${encodeURIComponent(id)}/whatsapp`, { method: 'DELETE' }),
     careRevokeLink: (id: string, linkId: string) =>
       authed<void>(`/v1/care/${encodeURIComponent(id)}/emergency-links/${encodeURIComponent(linkId)}`, { method: 'DELETE' }),
     canriskFile: () => requestText('/v1/risk/canrisk', token),
