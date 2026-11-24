@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Staff Guide</title>
+<style>
+  @page { size: A4; margin: 14mm; }
+  body { margin: 0; background: #fff; color: #1d1d1b; font: 14px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .page { max-width: 760px; margin: 0 auto; padding: 24px 20px 40px; }
+  .eyebrow { font-size: 12px; font-weight: 700; color: #2f6f62; text-transform: uppercase; letter-spacing: .06em; }
+  h1 { font-size: 24px; margin: 4px 0 6px; }
+  h2 { font-size: 16px; margin: 22px 0 6px; color: #2f6f62; border-bottom: 1px solid #e3e2dc; padding-bottom: 4px; }
+  .lede { color: #444; margin: 0 0 10px; }
+  .top { display: grid; grid-template-columns: minmax(0, 1fr) 132px; gap: 16px; align-items: start; }
+  .qr { width: 132px; height: 132px; }
+  .kv { font-size: 13px; } .kv b { display: inline-block; min-width: 92px; color: #555; font-weight: 600; }
+  .url { font: 600 13px/1.3 ui-monospace, Menlo, monospace; word-break: break-all; }
+  .script { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+  .say { background: #e6f0ed; border-radius: 10px; padding: 10px 12px; }
+  .say .who { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #2f6f62; margin-bottom: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td { border-bottom: 1px solid #e3e2dc; padding: 7px 6px; vertical-align: top; }
+  td:first-child { font-weight: 600; width: 38%; }
+  ul { margin: 6px 0; padding-left: 20px; } li { margin: 3px 0; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+  .no li::marker { content: "✕  "; color: #b4442f; } .yes li::marker { content: "✓  "; color: #2f6f62; }
+  .foot { margin-top: 22px; font-size: 12px; color: #666; }
+  .print { margin-top: 16px; font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
+  @media (max-width: 640px) { .top, .script, .two { grid-template-columns: minmax(0, 1fr); } .qr { width: 120px; height: 120px; } }
+  @media print { .print { display: none; } h2 { break-after: avoid; } .say, tr { break-inside: avoid; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="top">
+    <div>
+      <div class="eyebrow">Staff guide · Family Health Graph pilot</div>
+      <h1>{{CLINIC}}</h1>
+      <p class="lede">Patients share their family health history before their visit. You see who may need earlier screening
+        or a referral, and you track it to completion. This page is everything reception and clinical staff need.</p>
+      <div class="kv"><b>Patient link</b><span class="url">{{URL}}</span></div>
+      <div class="kv"><b>Clinic code</b>{{CODE}}</div>
+      <div class="kv"><b>Staff portal</b><span class="url">{{PORTAL}}</span></div>
+    </div>
+    <img class="qr" src="qr.svg" alt="QR code for the patient link">
+  </div>
+
+  <h2>1. At reception: what to say</h2>
+  <div class="script">
+    <div class="say"><div class="who">English</div>
+      “Before you see the doctor, could you share your family's health history? It takes two minutes on your phone:
+      scan this code, write who in your family had which illnesses, and tick to share it with us. Hindi is fine.
+      It's private and you can stop sharing any time.”</div>
+    <div class="say" lang="hi"><div class="who">हिंदी</div>
+      “डॉक्टर से मिलने से पहले, क्या आप अपने परिवार का स्वास्थ्य इतिहास बता सकते हैं? फ़ोन पर दो मिनट लगते हैं:
+      यह कोड स्कैन करें, लिखें कि परिवार में किसे कौन-सी बीमारी थी, और हमारे साथ साझा करने के लिए टिक करें।
+      हिंदी में लिख सकते हैं। यह निजी है और आप कभी भी साझा करना बंद कर सकते हैं।”</div>
+  </div>
+  <ul>
+    <li><b>Best moments:</b> when booking (add the link to the SMS or WhatsApp reminder), at check-in, and while waiting.</li>
+    <li><b>No smartphone?</b> A family member can do it on their phone with the patient, or the patient can do it at home from the reminder link.</li>
+    <li><b>Doesn't know much?</b> “Whatever you know helps. ‘Mother had sugar’ is enough to start. You can add more later.”</li>
+  </ul>
+
+  <h2>2. Common questions</h2>
+  <table>
+    <tr><td>Is it free?</td><td>Yes, for patients.</td></tr>
+    <tr><td>Who sees my information?</td><td>This clinic's care team, and only because you chose to share. Not insurers, not employers, never sold. You see a log of every access in the app.</td></tr>
+    <tr><td>Can I stop sharing?</td><td>Yes, any time, in the app (Settings → Your clinics) or by asking us. Deleting the account erases everything.</td></tr>
+    <tr><td>Is this a diagnosis?</td><td>No. It points out what may be worth discussing with the doctor, based on published screening guidelines.</td></tr>
+    <tr><td>Do I need the app?</td><td>No. The link works in the phone's browser. The app adds reminders, documents and family members.</td></tr>
+    <tr><td>Can I add my parents' reports?</td><td>Yes, in the app: photograph a prescription or lab report and choose whose it is.</td></tr>
+  </table>
+
+  <h2>3. For doctors and nurses: using the portal</h2>
+  <ul>
+    <li>Open <span class="url">{{PORTAL}}</span> and sign in. The <b>worklist</b> lists patients who shared, highest priority first, with the care programs each may qualify for.</li>
+    <li>Open a patient's <b>summary</b> before the visit: action items, the guideline behind each, and a family tree.</li>
+    <li>When you refer someone (genetic counseling, lipid clinic, earlier screening), set the referral status. Partners update it as they schedule and complete, and the patient sees it in the app.</li>
+    <li>The <b>referral funnel</b> and <b>Download pilot report</b> show how many patients were identified, referred, scheduled and seen.</li>
+  </ul>
+
+  <h2>4. Do and don't</h2>
+  <div class="two">
+    <ul class="yes">
+      <li>Let the patient (or a family member they choose) type and tick consent themselves.</li>
+      <li>Say clearly that it's optional and won't affect their care.</li>
+      <li>Treat action items as prompts for the doctor, not results.</li>
+      <li>Report anything that looks wrong to the pilot coordinator.</li>
+    </ul>
+    <ul class="no">
+      <li>Don't fill it in on a patient's behalf without them, or tick consent for them.</li>
+      <li>Don't tell a patient they “have” a condition because of an action item.</li>
+      <li>Don't take photos of patients' records on staff phones.</li>
+      <li>Don't share portal logins; each staff member joins with the staff code.</li>
+    </ul>
+  </div>
+
+  <h2>5. Who to contact</h2>
+  <p>Pilot coordinator: ______________________ · Phone: ______________ · Privacy questions: {{PRIVACY}}</p>
+
+  <p class="foot">Family Health Graph gives educational information based on published guidelines. It is not a diagnosis and
+    does not replace clinical judgement.</p>
+  <button class="print" onclick="window.print()">Print this guide</button>
+</div>
+</body>
+</html>

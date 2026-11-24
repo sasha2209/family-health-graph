@@ -2204,6 +2204,18 @@ def create_app(settings: Optional[Settings] = None,
             "{{CLINIC}}", esc(org["name"])).replace("{{URL}}", esc(url)).replace(
             "{{CODE}}", esc(org["patient_code"]))
 
+    @app.get("/c/{code}/staff-guide", response_class=HTMLResponse, include_in_schema=False)
+    def intake_staff_guide(code: str, request: Request) -> str:
+        """A printable one-pager for the clinic's staff: reception script (English and Hindi), patient questions,
+        using the portal, do's and don'ts. Uses only the public patient code, never the staff code."""
+        from html import escape as esc
+
+        org = clinic_by_code_or_404(code)
+        return (PKG_DIR / "static" / "staff-guide.html").read_text().replace(
+            "{{CLINIC}}", esc(org["name"])).replace("{{URL}}", esc(intake_url(org, request))).replace(
+            "{{CODE}}", esc(org["patient_code"])).replace("{{PORTAL}}", esc(public_base(request) + "/portal")).replace(
+            "{{PRIVACY}}", esc(settings.grievance_officer_email or "Settings → Your privacy rights in the app"))
+
     @app.get("/portal", response_class=HTMLResponse, include_in_schema=False)
     def portal_page() -> str:
         return (PKG_DIR / "static" / "portal.html").read_text()

@@ -114,7 +114,7 @@
           <h2>Pre-visit intake link</h2>
           <p class="muted" style="margin-top:0">Add this link to appointment reminders (text or email), or print the poster for your waiting room. Patients share their family history in about two minutes, with no app needed.</p>
           <div class="intake-url" id="intake-url"></div>
-          <div class="row" style="margin-top:8px"><button id="copy-link">Copy link</button><a id="poster" target="_blank" rel="noopener"><button tabindex="-1">Print poster</button></a></div>
+          <div class="row" style="margin-top:8px"><button id="copy-link">Copy link</button><a id="poster" target="_blank" rel="noopener"><button tabindex="-1">Print poster</button></a><a id="staff-guide" target="_blank" rel="noopener"><button tabindex="-1">Staff guide</button></a></div>
           <img id="intake-qr" alt="QR code for the intake link" width="150" height="150" style="margin-top:12px; background:#fff; border-radius:8px; padding:6px">
           <p class="muted" style="margin:12px 0 6px">Patients who already have the app can enter the clinic code instead:</p>
           <span class="code" id="patient-code"></span>
@@ -177,6 +177,7 @@ async function loadOrg() {
   $("intake-url").textContent = org.intake_url;
   $("intake-qr").src = `/c/${encodeURIComponent(org.patient_code)}/qr.svg`;
   $("poster").href = `/c/${encodeURIComponent(org.patient_code)}/poster`;
+  $("staff-guide").href = `/c/${encodeURIComponent(org.patient_code)}/staff-guide`;
   show("staff-box", !!org.staff_code); $("staff-code-out").textContent = org.staff_code || "";
   $("tiles").innerHTML = [
     [im.patients_connected, "Patients connected"],
