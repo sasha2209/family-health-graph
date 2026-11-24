@@ -10,7 +10,11 @@ import type { Api } from './api';
  * by the app itself. On web, the summary opens in a new tab to print or save.
  */
 export async function shareDoctorSummary(api: Api, includeShared = true): Promise<void> {
-  const html = await api.clinicianReport(includeShared);
+  await shareHtmlAsPdf(await api.clinicianReport(includeShared), 'Share your family health summary');
+}
+
+/** Print an HTML page to PDF on the device and open the share sheet (a new tab on web). */
+export async function shareHtmlAsPdf(html: string, dialogTitle: string): Promise<void> {
   if (Platform.OS === 'web') {
     const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
     globalThis.open?.(url, '_blank', 'noopener');
@@ -21,7 +25,7 @@ export async function shareDoctorSummary(api: Api, includeShared = true): Promis
     await Sharing.shareAsync(uri, {
       mimeType: 'application/pdf',
       UTI: 'com.adobe.pdf',
-      dialogTitle: 'Share your family health summary',
+      dialogTitle,
     });
   } else {
     await Print.printAsync({ uri });

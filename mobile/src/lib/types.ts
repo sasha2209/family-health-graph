@@ -309,3 +309,33 @@ export interface RiskReport {
   calculators?: { model: string; for: string; how: string; download: string }[];
   assessments: RiskAssessment[];
 }
+
+// --- caregiver mode (/v1/care) ----------------------------------------------------------------
+export type Slot = 'morning' | 'afternoon' | 'night';
+export interface Dose {
+  med_id: string; name: string; generic: string | null; slot: Slot; amount: number; food: string | null;
+  at: string; status: 'taken' | 'skipped' | 'missed' | 'due' | 'upcoming'; by: string | null;
+}
+export interface CareMedication {
+  id: string; name: string; generic: string | null; drug_class: string | null; dosage: string | null;
+  status: 'active' | 'stopped'; reminders: boolean; schedule: Partial<Record<Slot, number>>; as_needed: boolean;
+  food: string | null; understood: boolean; course_days: number | null; prescribed_on: string | null;
+  stock: number | null; stock_on: string | null;
+  refill: { days_left: number; runs_out_on: string; basis: 'stock' | 'course'; due: boolean } | null;
+}
+export interface CareInfo {
+  blood_group: string | null; allergies: string[]; emergency_contact_name: string | null;
+  emergency_contact_phone: string | null; doctor_name: string | null; doctor_phone: string | null;
+  hospital: string | null; notes: string | null;
+}
+export interface CareSummary {
+  care_id: string; role: 'owner' | 'caregiver'; name: string; relationship: string; today: Dose[]; refills_due: number;
+}
+export interface CareDetail extends Omit<CareSummary, 'refills_due'> {
+  member_id: string;
+  week: { day: string; taken: number; scheduled: number }[];
+  medications: CareMedication[];
+  info: CareInfo;
+  caregivers: { user_id: string; name: string | null; joined_at: string }[];
+  emergency_links: { id: string; expires_at: string; views: number; created_at: string }[];
+}

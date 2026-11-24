@@ -147,6 +147,24 @@ class Medication(BaseModel):
     drug_class: Optional[str] = None
     prescribed_on: Optional[date] = None
     source: str = "manual"
+    # Caregiver mode (fhg/care.py): reminders on, a corrected schedule {"morning": 1, "night": 0.5}, and how many
+    # tablets were at home on a given day, for refill alerts.
+    reminders: bool = False
+    schedule: Optional[dict[str, float]] = None
+    stock: Optional[float] = None
+    stock_on: Optional[date] = None
+
+
+class CareInfo(BaseModel):
+    """What a caregiver keeps for an emergency: shown on the emergency summary."""
+    blood_group: Optional[str] = Field(None, pattern=r"^(A|B|AB|O)[+-]$")
+    allergies: list[str] = Field(default_factory=list, max_length=20)
+    emergency_contact_name: Optional[str] = Field(None, max_length=80)
+    emergency_contact_phone: Optional[str] = Field(None, max_length=20)
+    doctor_name: Optional[str] = Field(None, max_length=80)
+    doctor_phone: Optional[str] = Field(None, max_length=20)
+    hospital: Optional[str] = Field(None, max_length=120)
+    notes: Optional[str] = Field(None, max_length=500)
 
 
 class FamilyMember(BaseModel):
@@ -161,6 +179,7 @@ class FamilyMember(BaseModel):
     # (a parent's prescription or lab report). Kept on the user's record only; never shared onward.
     medications: list["Medication"] = Field(default_factory=list)
     observations: list["Observation"] = Field(default_factory=list)
+    care: Optional[CareInfo] = None
     source: str = "manual"
     # True when (some of) this relative's data comes live from their own linked
     # account rather than from what the user typed or imported.

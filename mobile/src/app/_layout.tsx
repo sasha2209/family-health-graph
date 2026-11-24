@@ -31,6 +31,7 @@ function RootStack() {
         <Stack.Screen name="results" options={{ title: 'Your results' }} />
         <Stack.Screen name="connections" options={{ title: 'Connected records' }} />
         <Stack.Screen name="book" options={{ title: 'Book a test' }} />
+        <Stack.Screen name="care" options={{ title: 'Caregiver mode' }} />
         <Stack.Screen name="authorize" options={{ title: 'Share your family history', headerBackVisible: false }} />
       </Stack.Protected>
       <Stack.Protected guard={!token} redirectTo="/">
@@ -40,6 +41,7 @@ function RootStack() {
       <Stack.Screen name="invite/[token]" options={{ title: 'Family invitation' }} />
       <Stack.Screen name="sign-in" options={{ title: 'Sign in' }} />
       <Stack.Screen name="clinic/[code]" options={{ title: 'Share with your clinic' }} />
+      <Stack.Screen name="care-join/[token]" options={{ title: 'Care circle' }} />
     </Stack>
     </AppLockProvider>
   );

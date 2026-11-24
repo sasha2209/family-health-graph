@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
-from . import auth, bookings, clinic, i18n, inbound, partners, push, risk_models, trends
+from . import auth, bookings, care, clinic, emergency, i18n, inbound, partners, push, risk_models, trends
 from .connectors import smart
 from . import partner_oauth as poauth
 from .clinician_report import render_html as clinician_report_html
@@ -36,7 +36,7 @@ from . import documents as docs
 from .ingest import CsvImportError, parse_family_csv, parse_family_history_text, parse_fhir, to_fhir_bundle
 from .insights import generate_insights, summarize
 from .merge import find_match, merge_into
-from .models import Condition, FamilyMember, HealthProfile, Medication, Observation, Relationship, Sex
+from .models import CareInfo, Condition, FamilyMember, HealthProfile, Medication, Observation, Relationship, Sex
 from .security import constant_time_equals, hash_token, load_cipher, pseudonym
 from .sharing import CONSENT_AI_DOCS, CONSENT_LLM, CONSENT_WA_SUMMARIES, CONSENT_RESEARCH, PARTNERS, deidentify, partner_payload, share_scope
 from .storage import Store
@@ -321,6 +321,35 @@ class RiskResultIn(BaseModel):
     model: str = Field(min_length=1, max_length=80, description='e.g. "BOADICEA v6 (CanRisk)"')
     predictions: list[RiskPredictionIn] = Field(min_length=1, max_length=20)
     note: Optional[str] = Field(None, max_length=1000)
+
+
+class CareMedicationPatch(BaseModel):
+    reminders: Optional[bool] = None
+    dosage: Optional[str] = Field(None, max_length=200)
+    schedule: Optional[dict[str, float]] = Field(None, description='{"morning": 1, "night": 0.5}; {} clears it')
+    stock: Optional[float] = Field(None, ge=0, le=10000, description="Tablets at home today")
+    status: Optional[str] = Field(None, pattern="^(active|stopped)$")
+
+
+class CareMedicationIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    dosage: Optional[str] = Field(None, max_length=200)
+    stock: Optional[float] = Field(None, ge=0, le=10000)
+
+
+class DoseIn(BaseModel):
+    med_id: str
+    slot: str = Field(pattern="^(morning|afternoon|night)$")
+    day: Optional[date] = None
+    status: Optional[str] = Field(pattern="^(taken|skipped)$", description="null clears the mark")
+
+
+class CareJoinIn(BaseModel):
+    name: Optional[str] = Field(None, max_length=40, description="What the others in the circle call you")
+
+
+class EmergencyLinkIn(BaseModel):
+    hours: int = Field(24, ge=1, le=72)
 
 
 class ReferralIn(BaseModel):
@@ -704,6 +733,7 @@ def create_app(settings: Optional[Settings] = None,
                 raise HTTPException(404, "No such relative")
             profile.touch()
             store.save_profile(profile)
+        store.drop_care_for_member(user_id, member_id)
         store.audit(user_id, "user", "family.delete", {"member_id": member_id})
 
     @app.post("/v1/observations", status_code=201)
@@ -2209,5 +2239,249 @@ def create_app(settings: Optional[Settings] = None,
             records.append(deidentify(store.get_profile(uid), pseudonym(settings.pseudonym_secret, uid)))
             store.audit(uid, "admin", "research.export")
         return {"count": len(records), "records": records}
+
+    # --- caregiver mode ------------------------------------------------------------------------
+    # A "care id" is "<owner user id>.<relative id>": the relative lives on the owner's record; caregivers in the
+    # owner's care circle for that relative can see their medicines, mark doses and keep the emergency details.
+    def care_target(user_id: str, care_id: str) -> tuple[str, str, str]:
+        owner_id, _, member_id = care_id.partition(".")
+        if owner_id == user_id:
+            role = "owner"
+        elif owner_id and store.is_caregiver(owner_id, member_id, user_id):
+            role = "caregiver"
+        else:
+            raise HTTPException(404, "No such person")
+        if not any(m.id == member_id for m in store.get_profile(owner_id).family):
+            raise HTTPException(404, "No such person")
+        return owner_id, member_id, role
+
+    def care_member(owner_id: str, member_id: str) -> FamilyMember:
+        return next(m for m in store.get_profile(owner_id).family if m.id == member_id)
+
+    def care_name(m: FamilyMember) -> str:
+        return m.name or m.label
+
+    def care_out(owner_id: str, member_id: str, role: str, user_id: str) -> dict:
+        m = care_member(owner_id, member_id)
+        today = datetime.now(care.IST).date()
+        log = store.dose_log(owner_id, member_id, (today - timedelta(days=7)).isoformat())
+        names = {owner_id: "Owner"} | {c["user_id"]: c["name"] or "Caregiver" for c in store.caregivers(owner_id, member_id)}
+        for e in log:
+            e["by_name"] = "you" if e["by_user"] == user_id else names.get(e["by_user"], "someone")
+        meds = []
+        for med in m.medications:
+            s = care.schedule_for(med)
+            meds.append({"id": med.id, "name": med.name, "generic": med.generic, "drug_class": med.drug_class,
+                         "dosage": med.dosage, "status": med.status, "reminders": med.reminders,
+                         "schedule": s.slots, "as_needed": s.as_needed, "food": s.food, "understood": s.understood,
+                         "course_days": s.days, "prescribed_on": med.prescribed_on, "stock": med.stock,
+                         "stock_on": med.stock_on, "refill": care.refill(med, today)})
+        week = []
+        for back in range(6, -1, -1):
+            d = today - timedelta(days=back)
+            doses = care.doses_for_day(m, d, log)
+            week.append({"day": d.isoformat(), "taken": sum(x["status"] == "taken" for x in doses), "scheduled": len(doses)})
+        return {"care_id": f"{owner_id}.{member_id}", "role": role, "name": care_name(m), "relationship": m.label,
+                "member_id": member_id, "today": care.doses_for_day(m, today, log), "week": week,
+                "medications": meds, "info": (m.care or CareInfo()).model_dump(),
+                "caregivers": store.caregivers(owner_id, member_id) if role == "owner" else [],
+                "emergency_links": store.emergency_links(owner_id, member_id)}
+
+    @app.get("/v1/care")
+    def care_list(user_id: str = Depends(current_user)) -> list[dict]:
+        """Everyone you help look after: relatives on your record with medicines or care details, and relatives
+        others have added you to the care circle for."""
+        out = []
+        for m in store.get_profile(user_id).family:
+            if m.medications or m.care:
+                out.append(care_out(user_id, m.id, "owner", user_id))
+        for owner_id, member_id in store.caring_for(user_id):
+            if any(x.id == member_id for x in store.get_profile(owner_id).family):
+                out.append(care_out(owner_id, member_id, "caregiver", user_id))
+        return [{k: c[k] for k in ("care_id", "role", "name", "relationship", "today")}
+                | {"refills_due": sum(1 for med in c["medications"] if med["refill"] and med["refill"]["due"])}
+                for c in out]
+
+    @app.get("/v1/care/{care_id}")
+    def care_detail(care_id: str, user_id: str = Depends(current_user)) -> dict:
+        owner_id, member_id, role = care_target(user_id, care_id)
+        return care_out(owner_id, member_id, role, user_id)
+
+    @app.put("/v1/care/{care_id}/info")
+    def care_set_info(care_id: str, body: CareInfo, user_id: str = Depends(current_user)) -> dict:
+        owner_id, member_id, role = care_target(user_id, care_id)
+        with store.write_lock:
+            profile = store.get_profile(owner_id)
+            member = next(m for m in profile.family if m.id == member_id)
+            member.care = body
+            profile.touch()
+            store.save_profile(profile)
+        store.audit(owner_id, user_id if role == "caregiver" else "user", "care.info", {"member_id": member_id})
+        return care_out(owner_id, member_id, role, user_id)
+
+    def edit_member_meds(care_id: str, user_id: str, change) -> dict:
+        owner_id, member_id, role = care_target(user_id, care_id)
+        with store.write_lock:
+            profile = store.get_profile(owner_id)
+            member = next(m for m in profile.family if m.id == member_id)
+            what = change(member)
+            profile.touch()
+            store.save_profile(profile)
+        store.audit(owner_id, user_id if role == "caregiver" else "user", f"care.{what}", {"member_id": member_id})
+        return care_out(owner_id, member_id, role, user_id)
+
+    @app.post("/v1/care/{care_id}/medications", status_code=201)
+    def care_add_medication(care_id: str, body: CareMedicationIn, user_id: str = Depends(current_user)) -> dict:
+        from .medicines import lookup as lookup_medicine
+
+        def add(member: FamilyMember) -> str:
+            info = lookup_medicine(body.name)
+            member.medications.append(Medication(
+                name=body.name, dosage=body.dosage, generic=info.generic if info else None,
+                drug_class=info.drug_class if info else None, prescribed_on=datetime.now(care.IST).date(),
+                reminders=True, stock=body.stock, stock_on=datetime.now(care.IST).date() if body.stock is not None else None,
+                source="caregiver"))
+            return "medication_add"
+        return edit_member_meds(care_id, user_id, add)
+
+    @app.patch("/v1/care/{care_id}/medications/{med_id}")
+    def care_update_medication(care_id: str, med_id: str, body: CareMedicationPatch,
+                               user_id: str = Depends(current_user)) -> dict:
+        changes = body.model_dump(exclude_unset=True)
+        if "schedule" in changes and changes["schedule"]:
+            if set(changes["schedule"]) - set(care.SLOTS) or any(v < 0 or v > 10 for v in changes["schedule"].values()):
+                raise HTTPException(422, "Schedule slots are morning, afternoon and night, 0-10 each")
+
+        def update(member: FamilyMember) -> str:
+            med = next((x for x in member.medications if x.id == med_id), None)
+            if med is None:
+                raise HTTPException(404, "No such medicine")
+            for key, value in changes.items():
+                if key == "schedule":
+                    med.schedule = value or None
+                elif key == "stock":
+                    med.stock, med.stock_on = value, datetime.now(care.IST).date() if value is not None else None
+                else:
+                    setattr(med, key, value)
+            return "medication_update"
+        return edit_member_meds(care_id, user_id, update)
+
+    @app.post("/v1/care/{care_id}/doses")
+    def care_mark_dose(care_id: str, body: DoseIn, user_id: str = Depends(current_user)) -> dict:
+        owner_id, member_id, role = care_target(user_id, care_id)
+        member = care_member(owner_id, member_id)
+        today = datetime.now(care.IST).date()
+        day = body.day or today
+        if day > today or day < today - timedelta(days=7):
+            raise HTTPException(422, "Doses can be marked for today and the past 7 days")
+        med = next((x for x in member.medications if x.id == body.med_id), None)
+        if med is None or body.slot not in care.schedule_for(med).slots:
+            raise HTTPException(404, "That medicine isn't scheduled then")
+        store.log_dose(owner_id, member_id, body.med_id, day.isoformat(), body.slot, body.status, user_id)
+        return care_out(owner_id, member_id, role, user_id)
+
+    @app.post("/v1/care/{care_id}/invite")
+    def care_invite(care_id: str, request: Request, user_id: str = Depends(current_user)) -> dict:
+        """A one-time link (valid 7 days) for a sibling or other family member to join the care circle."""
+        owner_id, member_id, role = care_target(user_id, care_id)
+        if role != "owner":
+            raise HTTPException(403, "Only the person who added this relative can invite others")
+        token = secrets.token_urlsafe(24)
+        expires = datetime.now(timezone.utc) + timedelta(days=7)
+        store.create_care_invite(hash_token(token), owner_id, member_id, expires.isoformat())
+        store.audit(owner_id, "user", "care.invite", {"member_id": member_id})
+        name = care_name(care_member(owner_id, member_id))
+        url = f"{public_base(request)}/app/care-join/{token}"
+        return {"token": token, "url": url, "expires_at": expires.isoformat(),
+                "message": f"Help me look after {name} in Family Health Graph: {url}"}
+
+    @app.post("/v1/care/join/{token}")
+    def care_join(token: str, body: Optional[CareJoinIn] = None, user_id: str = Depends(current_user)) -> dict:
+        target = store.use_care_invite(hash_token(token))
+        if target is None:
+            raise HTTPException(404, "This invitation has expired or was already used")
+        owner_id, member_id = target
+        if owner_id == user_id:
+            raise HTTPException(409, "This is your own relative")
+        store.add_caregiver(owner_id, member_id, user_id, body.name if body else None)
+        store.audit(owner_id, user_id, "care.joined", {"member_id": member_id})
+        name = care_name(care_member(owner_id, member_id))
+        notifier.notify(owner_id, "care", f"{(body.name if body and body.name else 'Someone')} joined the care circle for {name}.")
+        return care_out(owner_id, member_id, "caregiver", user_id)
+
+    @app.delete("/v1/care/{care_id}/caregivers/{caregiver_id}", status_code=204)
+    def care_remove(care_id: str, caregiver_id: str, user_id: str = Depends(current_user)) -> Response:
+        """The owner removes a caregiver, or a caregiver leaves (caregiver_id "me")."""
+        owner_id, member_id, role = care_target(user_id, care_id)
+        who = user_id if caregiver_id == "me" else caregiver_id
+        if role != "owner" and who != user_id:
+            raise HTTPException(403, "Only the owner can remove others")
+        if not store.remove_caregiver(owner_id, member_id, who):
+            raise HTTPException(404, "Not in the care circle")
+        store.audit(owner_id, user_id if role == "caregiver" else "user", "care.left", {"member_id": member_id})
+        return Response(status_code=204)
+
+    @app.get("/v1/care/{care_id}/summary", response_class=HTMLResponse)
+    def care_summary(care_id: str, user_id: str = Depends(current_user)) -> HTMLResponse:
+        """The printable one-page emergency summary."""
+        owner_id, member_id, role = care_target(user_id, care_id)
+        store.audit(owner_id, user_id if role == "caregiver" else "user", "care.summary", {"member_id": member_id})
+        return HTMLResponse(emergency.render_html(emergency.summary(care_member(owner_id, member_id))),
+                            headers={"Cache-Control": "no-store"})
+
+    @app.post("/v1/care/{care_id}/emergency-links", status_code=201)
+    def care_emergency_link(care_id: str, request: Request, body: Optional[EmergencyLinkIn] = None,
+                            user_id: str = Depends(current_user)) -> dict:
+        """A link to the emergency summary that works without signing in, for 1-72 hours. Revocable; every
+        opening is logged and the family is notified."""
+        owner_id, member_id, role = care_target(user_id, care_id)
+        hours = body.hours if body else 24
+        token = secrets.token_urlsafe(24)
+        expires = datetime.now(timezone.utc) + timedelta(hours=hours)
+        link_id = store.create_emergency_link(hash_token(token), owner_id, member_id, user_id, expires.isoformat())
+        store.audit(owner_id, user_id if role == "caregiver" else "user", "care.emergency_link",
+                    {"member_id": member_id, "hours": hours})
+        return {"id": link_id, "url": f"{public_base(request)}/e/{token}", "expires_at": expires.isoformat()}
+
+    @app.delete("/v1/care/{care_id}/emergency-links/{link_id}", status_code=204)
+    def care_revoke_link(care_id: str, link_id: str, user_id: str = Depends(current_user)) -> Response:
+        owner_id, member_id, _ = care_target(user_id, care_id)
+        if not store.revoke_emergency_link(owner_id, member_id, link_id):
+            raise HTTPException(404, "No such link")
+        return Response(status_code=204)
+
+    @app.get("/e/{token}", response_class=HTMLResponse, include_in_schema=False)
+    def emergency_page(token: str) -> HTMLResponse:
+        link = store.open_emergency_link(hash_token(token))
+        headers = {"Cache-Control": "no-store", "X-Robots-Tag": "noindex", "Referrer-Policy": "no-referrer"}
+        if link is None:
+            return HTMLResponse(_connect_page("This emergency link has expired or was turned off.", None),
+                                status_code=404, headers=headers)
+        member = next((m for m in store.get_profile(link["owner_id"]).family if m.id == link["member_id"]), None)
+        if member is None:
+            return HTMLResponse(_connect_page("This emergency link is no longer valid.", None), status_code=404,
+                                headers=headers)
+        store.audit(link["owner_id"], "emergency_link", "care.emergency_viewed", {"member_id": member.id, "link": link["id"]})
+        for uid in {link["owner_id"], *(c["user_id"] for c in store.caregivers(link["owner_id"], member.id))}:
+            notifier.notify(uid, "care", f"{care_name(member)}'s emergency summary was just opened from a shared link.")
+        return HTMLResponse(emergency.render_html(emergency.summary(member), expires=link["expires_at"]), headers=headers)
+
+    @app.post("/admin/tasks/care", dependencies=[Depends(require_admin)])
+    def run_care_alerts() -> dict:
+        """Medicine reminders, missed-dose notices and refill alerts to everyone in the care circle. Run hourly."""
+        now, sent = datetime.now(timezone.utc), 0
+        for owner_id, member_id in store.care_targets():
+            member = care_member(owner_id, member_id)
+            today = now.astimezone(care.IST).date()
+            log = store.dose_log(owner_id, member_id, today.isoformat())
+            done = {n["key"] for n in store.nudges(owner_id)}
+            for key, message in care.due_care_alerts(now, care_name(member), member, log):
+                if key in done:
+                    continue
+                for uid in {owner_id, *(c["user_id"] for c in store.caregivers(owner_id, member_id))}:
+                    notifier.notify(uid, "care", message)
+                    sent += 1
+                store.record_nudge(owner_id, key, now.isoformat())
+        return {"sent": sent}
 
     return app

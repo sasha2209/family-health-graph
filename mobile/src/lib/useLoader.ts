@@ -31,5 +31,5 @@ export function useLoader<T>(load: () => Promise<T>) {
 
   useFocusEffect(useCallback(() => { run(); }, [run]));
 
-  return { data, error, refreshing, reload: () => run(true) };
+  return { data, error, refreshing, reload: () => run(true), setData };
 }

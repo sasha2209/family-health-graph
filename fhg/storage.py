@@ -240,6 +240,46 @@ CREATE TABLE IF NOT EXISTS risk_results (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_risk_results_user ON risk_results(user_id, created_at);
+-- Caregiver mode. A care circle lets others (siblings) help look after a relative on the owner's record.
+CREATE TABLE IF NOT EXISTS care_circle (
+    owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    member_id TEXT NOT NULL,
+    caregiver_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name BLOB,                        -- encrypted: what the caregiver is called ("Rahul")
+    joined_at TEXT NOT NULL,
+    PRIMARY KEY (owner_id, member_id, caregiver_id)
+);
+CREATE INDEX IF NOT EXISTS idx_care_circle_caregiver ON care_circle(caregiver_id);
+CREATE TABLE IF NOT EXISTS care_invites (
+    token_hash TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    member_id TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    used_at TEXT
+);
+CREATE TABLE IF NOT EXISTS dose_log (
+    owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    member_id TEXT NOT NULL,
+    med_id TEXT NOT NULL,
+    day TEXT NOT NULL,
+    slot TEXT NOT NULL,
+    status TEXT NOT NULL,             -- taken | skipped
+    by_user TEXT NOT NULL,
+    at TEXT NOT NULL,
+    PRIMARY KEY (owner_id, member_id, med_id, day, slot)
+);
+-- Time-limited, revocable links to a relative's emergency summary (e.g. for a hospital or an ambulance crew).
+CREATE TABLE IF NOT EXISTS emergency_links (
+    token_hash TEXT PRIMARY KEY,
+    id TEXT NOT NULL UNIQUE,
+    owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    member_id TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT,
+    views INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS nudges (
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     key TEXT NOT NULL,
@@ -630,6 +670,104 @@ class Store:
         return [{"id": r["id"], "partner_id": r["partner_id"], "partner_name": r["partner_name"],
                  "referral_id": r["referral_id"], "created_at": r["created_at"],
                  **json.loads(self._cipher.decrypt(r["data"]))} for r in rows]
+
+    # --- caregiver mode ---------------------------------------------------------------------
+    def add_caregiver(self, owner_id: str, member_id: str, caregiver_id: str, name: Optional[str]) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("INSERT OR REPLACE INTO care_circle (owner_id, member_id, caregiver_id, name, joined_at) "
+                               "VALUES (?, ?, ?, ?, ?)", (owner_id, member_id, caregiver_id,
+                                                         self._cipher.encrypt(name) if name else None, _now()))
+
+    def remove_caregiver(self, owner_id: str, member_id: str, caregiver_id: str) -> bool:
+        with self._lock, self._conn:
+            cur = self._conn.execute("DELETE FROM care_circle WHERE owner_id = ? AND member_id = ? AND caregiver_id = ?",
+                                     (owner_id, member_id, caregiver_id))
+        return cur.rowcount > 0
+
+    def caregivers(self, owner_id: str, member_id: str) -> list[dict]:
+        rows = self._query("SELECT caregiver_id, name, joined_at FROM care_circle WHERE owner_id = ? AND member_id = ? "
+                           "ORDER BY joined_at", (owner_id, member_id))
+        return [{"user_id": r["caregiver_id"], "name": self._cipher.decrypt(r["name"]) if r["name"] else None,
+                 "joined_at": r["joined_at"]} for r in rows]
+
+    def caring_for(self, caregiver_id: str) -> list[tuple[str, str]]:
+        return [(r["owner_id"], r["member_id"]) for r in
+                self._query("SELECT owner_id, member_id FROM care_circle WHERE caregiver_id = ?", (caregiver_id,))]
+
+    def is_caregiver(self, owner_id: str, member_id: str, user_id: str) -> bool:
+        return bool(self._query("SELECT 1 FROM care_circle WHERE owner_id = ? AND member_id = ? AND caregiver_id = ?",
+                                (owner_id, member_id, user_id)))
+
+    def drop_care_for_member(self, owner_id: str, member_id: str) -> None:
+        with self._lock, self._conn:
+            for table in ("care_circle", "care_invites", "dose_log", "emergency_links"):
+                self._conn.execute(f"DELETE FROM {table} WHERE owner_id = ? AND member_id = ?", (owner_id, member_id))
+
+    def create_care_invite(self, token_hash: str, owner_id: str, member_id: str, expires_at: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("INSERT INTO care_invites (token_hash, owner_id, member_id, expires_at) VALUES (?, ?, ?, ?)",
+                               (token_hash, owner_id, member_id, expires_at))
+
+    def use_care_invite(self, token_hash: str) -> Optional[tuple[str, str]]:
+        with self._lock, self._conn:
+            rows = self._conn.execute("SELECT owner_id, member_id FROM care_invites WHERE token_hash = ? AND used_at IS NULL "
+                                      "AND expires_at > ?", (token_hash, _now())).fetchall()
+            if not rows:
+                return None
+            self._conn.execute("UPDATE care_invites SET used_at = ? WHERE token_hash = ?", (_now(), token_hash))
+        return rows[0]["owner_id"], rows[0]["member_id"]
+
+    def log_dose(self, owner_id: str, member_id: str, med_id: str, day: str, slot: str, status: Optional[str],
+                 by_user: str) -> None:
+        with self._lock, self._conn:
+            if status is None:
+                self._conn.execute("DELETE FROM dose_log WHERE owner_id = ? AND member_id = ? AND med_id = ? AND day = ? "
+                                   "AND slot = ?", (owner_id, member_id, med_id, day, slot))
+            else:
+                self._conn.execute("INSERT OR REPLACE INTO dose_log VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                                   (owner_id, member_id, med_id, day, slot, status, by_user, _now()))
+
+    def dose_log(self, owner_id: str, member_id: str, since: str) -> list[dict]:
+        return [dict(r) for r in self._query("SELECT med_id, day, slot, status, by_user, at FROM dose_log WHERE owner_id = ? "
+                                             "AND member_id = ? AND day >= ? ORDER BY day, slot", (owner_id, member_id, since))]
+
+    def care_targets(self) -> list[tuple[str, str]]:
+        """Every (owner, relative) with medicine reminders switched on, for the hourly job."""
+        out = []
+        for uid in self.user_ids():
+            for m in self.get_profile(uid).family:
+                if any(med.reminders for med in m.medications):
+                    out.append((uid, m.id))
+        return out
+
+    def create_emergency_link(self, token_hash: str, owner_id: str, member_id: str, created_by: str,
+                              expires_at: str) -> str:
+        link_id = uuid.uuid4().hex[:12]
+        with self._lock, self._conn:
+            self._conn.execute("INSERT INTO emergency_links (token_hash, id, owner_id, member_id, created_by, expires_at, "
+                               "created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                               (token_hash, link_id, owner_id, member_id, created_by, expires_at, _now()))
+        return link_id
+
+    def emergency_links(self, owner_id: str, member_id: str) -> list[dict]:
+        return [dict(r) for r in self._query(
+            "SELECT id, expires_at, revoked_at, views, created_at FROM emergency_links WHERE owner_id = ? AND member_id = ? "
+            "AND revoked_at IS NULL AND expires_at > ? ORDER BY created_at DESC", (owner_id, member_id, _now()))]
+
+    def revoke_emergency_link(self, owner_id: str, member_id: str, link_id: str) -> bool:
+        with self._lock, self._conn:
+            cur = self._conn.execute("UPDATE emergency_links SET revoked_at = ? WHERE id = ? AND owner_id = ? AND "
+                                     "member_id = ? AND revoked_at IS NULL", (_now(), link_id, owner_id, member_id))
+        return cur.rowcount > 0
+
+    def open_emergency_link(self, token_hash: str) -> Optional[dict]:
+        with self._lock, self._conn:
+            rows = self._conn.execute("SELECT * FROM emergency_links WHERE token_hash = ? AND revoked_at IS NULL "
+                                      "AND expires_at > ?", (token_hash, _now())).fetchall()
+            if not rows:
+                return None
+            self._conn.execute("UPDATE emergency_links SET views = views + 1 WHERE token_hash = ?", (token_hash,))
+        return dict(rows[0])
 
     def nudges(self, user_id: str) -> list[dict]:
         return [dict(r) for r in self._query("SELECT key, sent_at FROM nudges WHERE user_id = ?", (user_id,))]

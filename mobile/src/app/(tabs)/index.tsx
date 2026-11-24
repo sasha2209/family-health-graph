@@ -28,9 +28,9 @@ export default function HomeScreen() {
   const c = usePalette();
   const { api } = useSession();
   const { data, error, refreshing, reload } = useLoader(async () => {
-    const [report, notes, own, links, me, push, referrals, documents, myBookings] = await Promise.all([
+    const [report, notes, own, links, me, push, referrals, documents, myBookings, caring] = await Promise.all([
       api.insights(), api.notifications(), api.profile(false), api.links(), api.me(), api.pushStatus(),
-      api.referrals(), api.documents(), api.bookings()]);
+      api.referrals(), api.documents(), api.bookings(), api.care()]);
     const rels = new Set(own.family.map((m) => m.relationship));
     const steps: { title: string; detail: string; done: boolean; href: Href }[] = [
       { title: 'Add your family’s health history', detail: 'Start with what you know. A sentence or two is fine.',
@@ -57,7 +57,8 @@ export default function HomeScreen() {
     const pending = documents.filter((d) => d.status === 'review');
     const testCount = new Set((own.observations ?? []).map((o) => o.code)).size;
     const activeBookings = myBookings.filter((b) => ['requested', 'scheduled', 'sample_collected'].includes(b.status));
-    return { report, notes: notes.filter((n) => !n.read), steps, referrals, pending, testCount, activeBookings };
+    return { report, notes: notes.filter((n) => !n.read), steps, referrals, pending, testCount, activeBookings,
+             caring: caring.filter((p) => p.today.length > 0 || p.refills_due > 0 || p.role === 'caregiver') };
   });
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryBusy, setSummaryBusy] = useState(false);
@@ -65,7 +66,7 @@ export default function HomeScreen() {
   const [pdfError, setPdfError] = useState<string | null>(null);
 
   if (!data) return <Screen>{error ? <ErrorText>{error}</ErrorText> : <Loading />}</Screen>;
-  const { report, notes, steps, referrals, pending, testCount, activeBookings } = data;
+  const { report, notes, steps, referrals, pending, testCount, activeBookings, caring } = data;
   const done = steps.filter((s) => s.done).length;
   const todo = steps.filter((s) => !s.done);
   const urgent = report.insights.filter((i) => i.level === 'high').length;
@@ -102,6 +103,23 @@ export default function HomeScreen() {
                  onPress={() => router.push({ pathname: '/document/[id]', params: { id: d.id } })}
                  last={i === pending.length - 1} />
           ))}
+        </Section>
+      )}
+
+      {caring.length > 0 && (
+        <Section title="Caring for">
+          {caring.map((p, i) => {
+            const open = p.today.filter((d) => d.status === 'due' || d.status === 'missed').length;
+            const taken = p.today.filter((d) => d.status === 'taken').length;
+            return (
+              <Row key={p.care_id} title={p.name}
+                   detail={[p.today.length ? `${taken} of ${p.today.length} doses taken today` : null,
+                            open ? `${open} to mark` : null,
+                            p.refills_due ? `${p.refills_due} to reorder` : null].filter(Boolean).join(' · ') || 'Medicines and emergency details'}
+                   onPress={() => router.push({ pathname: '/care', params: { id: p.care_id } })}
+                   last={i === caring.length - 1} />
+            );
+          })}
         </Section>
       )}
 
