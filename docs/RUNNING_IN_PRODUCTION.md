@@ -12,12 +12,24 @@ tab only. Ten wrong keys lock that address out for 15 minutes. It works on a pho
 | Tab | What you can do |
 |---|---|
 | **Overview** | Families, documents, care circles, doses marked this week, clinics, partners, open and overdue privacy concerns, breaches; test bookings by partner and status, with value in ₹ |
+| **Pilot report** | Outcomes across all families: building the record (relatives, three generations, documents, weekly use), what it found, follow-through (tests booked and completed, days to result, clinic referrals), caregiving (doses taken over 28 days), and the survey answers. **Download CSV to share**: counts from 1 to 4 show as “<5” |
 | **Partners** | Add a lab or counseling partner (its API key and webhook secret are shown once), set its price list (price, home collection, turnaround per test), turn it off or on |
 | **Concerns** | Answer privacy concerns before their due date; the answer reaches the person in the app |
 | **Breaches** | Record a breach and notify the people affected; record when the Data Protection Board was informed and sent the report |
 | **Jobs & backups** | When each background job last ran and how it went; run any of them now |
 
 Everything the console does is also available as `/admin/...` API calls with the `X-Admin-Key` header.
+
+## The pilot report and surveys
+
+`fhg/pilot.py` computes the report (`GET /admin/pilot-report`, or `?format=csv` for the shareable version). Families
+see an optional question card on Home, which they can skip:
+- at sign-up: how much of their family's health history they knew, and whether they had ever discussed it with a
+  doctor;
+- after 8 weeks: whether the app led them to a test or a doctor, and how useful it was.
+
+Answers are part of each person's data download and are only reported as counts. The privacy notice lists this use.
+Each clinic also has its own referral funnel and report in the clinic portal.
 
 ## Background jobs
 

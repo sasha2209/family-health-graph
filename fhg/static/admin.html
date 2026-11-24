@@ -69,6 +69,7 @@
   <div class="row"><h1>Pilot operations</h1><span id="env" class="env" hidden></span></div>
   <nav id="tabs" hidden>
     <button data-tab="overview" aria-current="page">Overview</button>
+    <button data-tab="report">Pilot report</button>
     <button data-tab="partners">Partners</button>
     <button data-tab="grievances">Concerns</button>
     <button data-tab="breaches">Breaches</button>
@@ -95,6 +96,15 @@
     <div class="card" style="margin-top:14px">
       <h2>Test bookings</h2>
       <div class="table-wrap"><table id="bookings"><thead><tr><th>Partner</th><th>Status</th><th class="num">Bookings</th><th class="num">Value</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+
+  <section data-panel="report" hidden>
+    <div class="card">
+      <div class="row" style="justify-content:space-between"><h2 style="margin:0">Pilot report</h2>
+        <button class="primary" id="report-csv">Download CSV to share</button></div>
+      <p class="muted small">Across every family in the pilot. The CSV shows counts from 1 to 4 as “&lt;5” so no family can be picked out.</p>
+      <div id="report"></div>
     </div>
   </section>
 
@@ -194,7 +204,7 @@
     document.querySelectorAll('nav [data-tab]').forEach((b) => {
       if (b.dataset.tab === tab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
     });
-    ({ overview: loadOverview, partners: loadPartners, grievances: loadGrievances, breaches: loadBreaches, jobs: loadJobs })[tab]();
+    ({ overview: loadOverview, report: loadReport, partners: loadPartners, grievances: loadGrievances, breaches: loadBreaches, jobs: loadJobs })[tab]();
   }
   $('#tabs').addEventListener('click', (e) => { const t = e.target.closest('[data-tab]'); if (t) show(t.dataset.tab); });
   $('#signout').addEventListener('click', () => { try { sessionStorage.removeItem('fhg_admin'); } catch { /* ignore */ } location.reload(); });
@@ -225,6 +235,45 @@
       `<tr><td>${esc(b.partner)}</td><td>${esc(b.status.replace(/_/g, ' '))}</td><td class="num">${esc(b.n)}</td><td class="num">${inr(b.value_inr)}</td></tr>`).join('')
       : '<tr><td colspan="4" class="muted">No bookings yet.</td></tr>';
   });
+
+  // --- pilot report ---
+  const pct = (v) => (v == null ? '—' : `${v}%`);
+  const table = (rows) => `<div class="table-wrap"><table><tbody>${rows.map(([l, v]) =>
+    `<tr><td>${esc(l)}</td><td class="num">${esc(v ?? '—')}</td></tr>`).join('')}</tbody></table></div>`;
+  const loadReport = guard(async () => {
+    const r = await api('/admin/pilot-report');
+    const f = r.families, tst = r.tests, ref = r.referrals, cg = r.caregiving;
+    const survey = Object.values(r.survey).map((s) => `<h3 style="font-size:14px;margin:14px 0 6px">${esc(s.question)}</h3>
+      ${s.responses ? table(Object.entries(s.answers).map(([a, n]) => [a.replace(/_/g, ' '), `${n} (${Math.round(100 * n / s.responses)}%)`]))
+        : '<p class="muted small">No answers yet.</p>'}`).join('');
+    $('#report').innerHTML = `
+      <div class="tiles">${[['Families', f.total], ['Something to act on', r.findings.families_with_an_item],
+        ['Tests completed', `${tst.completed} of ${tst.booked}`], ['Doses taken (28 days)', pct(cg.adherence_percent)]]
+        .map(([l, n]) => `<div class="tile"><div class="n">${esc(n)}</div><div class="l">${esc(l)}</div></div>`).join('')}</div>
+      <h3 style="font-size:14px;margin:16px 0 6px">Building the record</h3>
+      ${table([['Families taking part', f.total], ['Added at least one relative', f.with_relatives], ['Recorded three generations', f.with_three_generations],
+        ['Median relatives recorded', f.median_relatives], ['Added a lab report or prescription', f.added_a_document], ['Used the app in the last 7 days', f.active_last_7_days]])}
+      <h3 style="font-size:14px;margin:16px 0 6px">What it found</h3>
+      ${table([['Families with something to act on', r.findings.families_with_an_item], ['… to discuss with a doctor soon', r.findings.families_with_an_item_to_discuss_soon],
+        ...Object.entries(r.findings.by_item)])}
+      <h3 style="font-size:14px;margin:16px 0 6px">Follow-through</h3>
+      ${table([['Tests booked', tst.booked], ['Tests completed', tst.completed], ['Completion rate', pct(tst.completion_rate_percent)],
+        ['Median days from booking to result', tst.median_days_to_result], ['Referrals made by clinics', ref.made],
+        ['Referrals scheduled', ref.scheduled], ['Referrals completed', ref.completed], ['Referrals declined', ref.declined]])}
+      <h3 style="font-size:14px;margin:16px 0 6px">Caregiving</h3>
+      ${table([['People with medicine reminders', cg.people_with_reminders], ['Doses scheduled (28 days)', cg.doses_scheduled_28d],
+        ['Doses marked taken', cg.doses_taken_28d], ['Doses taken', pct(cg.adherence_percent)]])}
+      <h3 style="font-size:14px;margin:16px 0 6px">Surveys</h3>${survey}
+      <p class="muted small" style="margin-top:12px">Generated ${esc(when(r.generated_at))}.</p>`;
+  });
+  $('#report-csv').addEventListener('click', guard(async () => {
+    const res = await fetch('/admin/pilot-report?format=csv', { headers: { 'X-Admin-Key': key } });
+    if (!res.ok) throw new Error('Could not make the CSV');
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement('a'); a.href = url;
+    a.download = (res.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'pilot-report.csv';
+    a.click(); URL.revokeObjectURL(url);
+  }));
 
   // --- partners & price lists ---
   const loadPartners = guard(async () => {

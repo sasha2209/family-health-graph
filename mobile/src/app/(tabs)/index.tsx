@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Text, View } from 'react-native';
 
 import { Badge, Check, Progress, Row, Section } from '../../components/list';
+import { SurveyCard } from '../../components/SurveyCard';
 import { Banner, Body, Button, Card, ErrorText, H2, Loading, Screen, styles } from '../../components/ui';
 import { shareDoctorSummary } from '../../lib/doctorSummary';
 import { BOOKING_LABEL, capitalize, DOC_TYPE_LABEL, formatDay, label, REFERRAL_LABEL, VIA_LABEL } from '../../lib/format';
@@ -96,6 +97,8 @@ export default function HomeScreen() {
           <Button title={t('Dismiss')} onPress={async () => { await api.markNotificationsRead(); reload(); }} />
         </View>
       )}
+
+      <SurveyCard />
 
       {pending.length > 0 && (
         <Section title={t('Waiting for your review')} right={<Text style={{ color: c.muted }}>{pending.length}</Text>}>

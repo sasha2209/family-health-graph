@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
-from . import auth, backup as backups, bookings, care, clinic, emergency, i18n, monitoring, privacy, inbound, partners, push, risk_models, trends
+from . import auth, backup as backups, bookings, care, clinic, emergency, i18n, monitoring, pilot, privacy, inbound, partners, push, risk_models, trends
 from .connectors import abdm, smart
 from . import partner_oauth as poauth
 from .clinician_report import render_html as clinician_report_html
@@ -378,6 +378,10 @@ class CareJoinIn(BaseModel):
     name: Optional[str] = Field(None, max_length=40, description="What the others in the circle call you")
 
 
+class SurveyAnswerIn(BaseModel):
+    answer: str = Field(min_length=1, max_length=40, description='One of the question\'s options, or "skipped"')
+
+
 class LanguageIn(BaseModel):
     lang: str = Field(pattern="^(en|hi|bn|ta|te|mr)$")
 
@@ -722,6 +726,25 @@ def create_app(settings: Optional[Settings] = None,
         identities = store.identities_for(session["user_id"])
         return {"user_id": session["user_id"], "session_id": session["id"],
                 "secured": bool(identities), "identities": identities, "lang": store.user_lang(session["user_id"])}
+
+    @app.get("/v1/surveys")
+    def surveys_due(user_id: str = Depends(current_user)) -> list[dict]:
+        """Optional pilot questions to show now (at sign-up, and again after 8 weeks). Answers are only reported
+        as counts across all families."""
+        created = next((u["created_at"] for u in store.users_overview() if u["id"] == user_id), None)
+        answered = {a["question"] for a in store.survey_answers(user_id)}
+        due = pilot.due_questions(created, answered, datetime.now(timezone.utc)) if created else []
+        return [{"id": q, "text": pilot.QUESTIONS[q]["text"], "options": pilot.QUESTIONS[q]["options"]} for q in due]
+
+    @app.post("/v1/surveys/{question}", status_code=204)
+    def answer_survey(question: str, body: SurveyAnswerIn, user_id: str = Depends(current_user)) -> Response:
+        q = pilot.QUESTIONS.get(question)
+        if q is None:
+            raise HTTPException(404, "No such question")
+        if body.answer not in q["options"] and body.answer != "skipped":
+            raise HTTPException(422, f"Answer with one of {q['options']}, or skipped")
+        store.save_survey_answer(user_id, question, body.answer)
+        return Response(status_code=204)
 
     @app.put("/v1/profile/language")
     def set_language(body: LanguageIn, user_id: str = Depends(current_user)) -> dict:
@@ -1721,6 +1744,17 @@ def create_app(settings: Optional[Settings] = None,
                 "scheduler": settings.scheduler, "backups": bool(settings.backup_dir),
                 "tests": {code: t["name"] for code, t in bookings.TESTS.items()}, "partner_kinds": list(partners.PARTNER_KINDS)}
 
+    @app.get("/admin/pilot-report", dependencies=[Depends(require_admin)])
+    def admin_pilot_report(format: str = Query("json", pattern="^(json|csv)$")) -> Response:
+        """Outcomes across every family in the pilot: onboarding, findings, tests, referrals, caregiving, surveys.
+        The CSV is for sharing: counts from 1 to 4 are shown as "<5"."""
+        r = pilot.report(store)
+        if format == "csv":
+            return Response(pilot.to_csv(r), media_type="text/csv; charset=utf-8", headers={
+                "Content-Disposition": f'attachment; filename="pilot-report-{r["generated_at"][:10]}.csv"',
+                "Cache-Control": "no-store"})
+        return JSONResponse(r)
+
     @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
     def admin_console() -> HTMLResponse:
         return HTMLResponse((PKG_DIR / "static" / "admin.html").read_text(),
@@ -2523,6 +2557,7 @@ def create_app(settings: Optional[Settings] = None,
                "connections": [{k: c[k] for k in ("display_name", "kind", "status", "created_at")} for c in store.connections(user_id)],
                "bookings": store.bookings_for_user(user_id), "risk_assessments": store.risk_results(user_id),
                "nominee": store.nominee(user_id), "grievances": store.grievances(user_id=user_id),
+               "survey_answers": store.survey_answers(user_id),
                "notifications": store.notifications(user_id), "access_log": store.audit_log(user_id)}
         store.audit(user_id, "user", "privacy.export")
         return Response(json.dumps(out, default=str, ensure_ascii=False, indent=1), media_type="application/json",

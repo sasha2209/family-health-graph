@@ -316,6 +316,14 @@ CREATE TABLE IF NOT EXISTS job_runs (
     status TEXT NOT NULL,
     detail TEXT
 );
+-- Optional pilot survey answers (fhg/pilot.py). Only reported in aggregate.
+CREATE TABLE IF NOT EXISTS survey_answers (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    answered_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, question)
+);
 CREATE TABLE IF NOT EXISTS nudges (
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     key TEXT NOT NULL,
@@ -707,6 +715,37 @@ class Store:
         return [{"id": r["id"], "partner_id": r["partner_id"], "partner_name": r["partner_name"],
                  "referral_id": r["referral_id"], "created_at": r["created_at"],
                  **json.loads(self._cipher.decrypt(r["data"]))} for r in rows]
+
+    # --- pilot report -----------------------------------------------------------------------------
+    def save_survey_answer(self, user_id: str, question: str, answer: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("INSERT OR REPLACE INTO survey_answers (user_id, question, answer, answered_at) "
+                               "VALUES (?, ?, ?, ?)", (user_id, question, answer, _now()))
+
+    def survey_answers(self, user_id: Optional[str] = None) -> list[dict]:
+        sql, params = "SELECT user_id, question, answer, answered_at FROM survey_answers", ()
+        if user_id:
+            sql, params = sql + " WHERE user_id = ?", (user_id,)
+        return [dict(r) for r in self._query(sql, params)]
+
+    def users_overview(self) -> list[dict]:
+        """Per account: when it was created and last used. For pilot metrics only."""
+        rows = self._query("SELECT u.id, u.created_at, MAX(s.last_used_at) AS last_seen FROM users u "
+                           "LEFT JOIN sessions s ON s.user_id = u.id GROUP BY u.id")
+        return [dict(r) for r in rows]
+
+    def all_bookings(self) -> list[dict]:
+        return [self._booking_row(r, False) for r in self._query(self._BOOKING_SQL + "ORDER BY b.created_at")]
+
+    def all_referrals(self) -> list[dict]:
+        return [dict(r) for r in self._query("SELECT org_id, user_id, rule_id, status, created_at, updated_at FROM referrals")]
+
+    def saved_document_users(self) -> set[str]:
+        return {r["user_id"] for r in self._query("SELECT DISTINCT user_id FROM documents WHERE status = 'saved'")}
+
+    def all_dose_logs(self, since: str) -> list[dict]:
+        return [dict(r) for r in self._query("SELECT owner_id, member_id, med_id, day, slot, status FROM dose_log WHERE day >= ?",
+                                             (since,))]
 
     # --- operations overview (admin console) -----------------------------------------------------
     def counts(self) -> dict:

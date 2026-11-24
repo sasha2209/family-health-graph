@@ -153,6 +153,9 @@ export function createApi(token: string | null) {
     risk: () => authed<RiskReport>('/v1/risk'),
     setLanguage: (lang: string) => authed<{ lang: string }>('/v1/profile/language', { method: 'PUT', body: { lang } }),
     care: () => authed<CareSummary[]>('/v1/care'),
+    surveys: () => authed<{ id: string; text: string; options: string[] }[]>('/v1/surveys'),
+    answerSurvey: (id: string, answer: string) =>
+      authed<void>(`/v1/surveys/${encodeURIComponent(id)}`, { method: 'POST', body: { answer } }),
     careDetail: (id: string) => authed<CareDetail>(`/v1/care/${encodeURIComponent(id)}`),
     careSetInfo: (id: string, body: CareInfo) =>
       authed<CareDetail>(`/v1/care/${encodeURIComponent(id)}/info`, { method: 'PUT', body }),
