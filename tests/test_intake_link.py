@@ -71,3 +71,24 @@ def test_joining_via_link_is_counted(client, clinic):
 def test_app_links_cover_intake_path(client):
     comps = client.get("/.well-known/apple-app-site-association").json()["applinks"]["details"][0]["components"]
     assert {"/": "/c/*", "comment": "Clinic intake links open in the app"} in comps
+
+
+def test_staff_guide(client, clinic):
+    admin, org = clinic
+    guide = client.get(f"/c/{org['patient_code']}/staff-guide")
+    assert guide.status_code == 200
+    text = guide.text
+    assert "Riverside Family Practice" in text and org["intake_url"] in text and "https://app.example.org/portal" in text
+    assert "डॉक्टर से मिलने से पहले" in text                       # the Hindi reception script
+    assert org["staff_code"] not in text                             # never the staff code
+    assert client.get("/c/NOPE-NOPE/staff-guide").status_code == 404
+    evil = client.post("/v1/orgs", json={"name": "<b>x</b> Clinic"}, headers=account(client)).json()
+    assert "<b>x</b>" not in client.get(f"/c/{evil['patient_code']}/staff-guide").text
+
+
+def test_intake_and_poster_have_hindi(client, clinic):
+    admin, org = clinic
+    page = client.get(f"/c/{org['patient_code']}").text
+    assert '"hi"' in page and "मेरे क्लिनिक के साथ साझा करें" in page and 'id="lang"' in page
+    poster = client.get(f"/c/{org['patient_code']}/poster").text
+    assert "मुलाक़ात से पहले" in poster
