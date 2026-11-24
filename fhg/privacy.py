@@ -48,6 +48,7 @@ PURPOSES = {
         "Share with the people and services you choose: relatives, your clinic, a lab or counselor, apps you connect",
         "Send reminders you turned on (tests, medicines)",
         "Keep your account secure and keep a record of access",
+        "Count, across all families and never individually, how the pilot is going (including any survey answers you give)",
     ],
     "hi": [
         "आपके और आपके परिवार के इतिहास के आधार पर बचाव संबंधी सलाह दिखाना",
@@ -55,6 +56,7 @@ PURPOSES = {
         "आपकी चुनी हुई जगहों से साझा करना: रिश्तेदार, आपका क्लिनिक, लैब या काउंसलर, जोड़े गए ऐप",
         "आपके चालू किए गए रिमाइंडर भेजना (जाँच, दवाइयाँ)",
         "आपका खाता सुरक्षित रखना और पहुँच का रिकॉर्ड रखना",
+        "सभी परिवारों को मिलाकर, कभी किसी एक के बारे में नहीं, यह गिनना कि पायलट कैसा चल रहा है (आपके दिए सर्वे जवाबों सहित)",
     ],
 }
 
