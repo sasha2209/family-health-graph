@@ -1683,9 +1683,19 @@ def create_app(settings: Optional[Settings] = None,
         return {"id": rid}
 
     # --- platform admin: manage referral partners -------------------------------------------
-    def require_admin(x_admin_key: Optional[str] = Header(None)) -> None:
+    admin_failures: dict[str, list[float]] = {}
+
+    def require_admin(request: Request, x_admin_key: Optional[str] = Header(None)) -> None:
+        # Lock an address out for 15 minutes after 10 wrong keys: the console makes guessing easy otherwise.
+        ip = request.client.host if request.client else "?"
+        now = datetime.now(timezone.utc).timestamp()
+        recent = [t for t in admin_failures.get(ip, []) if now - t < 900]
+        if len(recent) >= 10:
+            raise HTTPException(429, "Too many wrong admin keys. Try again in 15 minutes.")
         if not settings.admin_key or not x_admin_key or not constant_time_equals(x_admin_key, settings.admin_key):
+            admin_failures[ip] = recent + [now]
             raise HTTPException(403, "Admin key required")
+        admin_failures.pop(ip, None)
 
     @app.post("/admin/partners", status_code=201, dependencies=[Depends(require_admin)])
     def admin_create_partner(body: PartnerIn) -> dict:
@@ -1695,7 +1705,26 @@ def create_app(settings: Optional[Settings] = None,
 
     @app.get("/admin/partners", dependencies=[Depends(require_admin)])
     def admin_list_partners() -> list[dict]:
-        return store.partners(active_only=False)
+        catalogs = store.partner_catalogs()
+        return [p | {"catalog": catalogs.get(p["id"], [])} for p in store.partners(active_only=False)]
+
+    @app.post("/admin/partners/{partner_id}/activate", dependencies=[Depends(require_admin)])
+    def admin_activate_partner(partner_id: str) -> dict:
+        if not store.set_partner_active(partner_id, True):
+            raise HTTPException(404, "No such partner")
+        return store.partner(partner_id)
+
+    @app.get("/admin/overview", dependencies=[Depends(require_admin)])
+    def admin_overview() -> dict:
+        """The numbers the console's first screen shows."""
+        return {"counts": store.counts(), "bookings": store.booking_metrics(), "environment": settings.environment,
+                "scheduler": settings.scheduler, "backups": bool(settings.backup_dir),
+                "tests": {code: t["name"] for code, t in bookings.TESTS.items()}, "partner_kinds": list(partners.PARTNER_KINDS)}
+
+    @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
+    def admin_console() -> HTMLResponse:
+        return HTMLResponse((PKG_DIR / "static" / "admin.html").read_text(),
+                            headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"})
 
     @app.post("/admin/partners/{partner_id}/deactivate", dependencies=[Depends(require_admin)])
     def admin_deactivate_partner(partner_id: str) -> dict:
@@ -2841,6 +2870,21 @@ def create_app(settings: Optional[Settings] = None,
         """Make a backup now (also runs nightly when the scheduler is on)."""
         out = run_backup()
         store.record_job_run("backup", datetime.now(timezone.utc).isoformat(), "ok", out)
+        return out
+
+    @app.post("/admin/jobs/{name}/run", dependencies=[Depends(require_admin)])
+    def admin_run_job(name: str) -> dict:
+        """Run a background job now and record it, as if the scheduler had (the console's "Run now")."""
+        job = next((j for j in jobs if j.name == name), None)
+        if job is None:
+            raise HTTPException(404, f"No such job; jobs are {[j.name for j in jobs]}")
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            out = job.run()
+        except Exception as exc:
+            store.record_job_run(name, now, "error", {"error": str(exc)[:500]})
+            raise HTTPException(500, f"The {name} job failed: {exc}") from exc
+        store.record_job_run(name, now, "ok", out)
         return out
 
     @app.get("/admin/jobs", dependencies=[Depends(require_admin)])

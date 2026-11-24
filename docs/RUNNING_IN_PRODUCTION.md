@@ -4,6 +4,21 @@ What keeps the service healthy once real families use it: background jobs, backu
 error tracking, uptime alerts, and a staging copy for trying changes. Deployment itself is in [DEPLOY.md](DEPLOY.md);
 the phone apps are in [RELEASE.md](RELEASE.md).
 
+## The operations console
+
+Open `https://<your-service>/admin` and sign in with the admin key (`FHG_ADMIN_KEY`). The key stays in that browser
+tab only. Ten wrong keys lock that address out for 15 minutes. It works on a phone too.
+
+| Tab | What you can do |
+|---|---|
+| **Overview** | Families, documents, care circles, doses marked this week, clinics, partners, open and overdue privacy concerns, breaches; test bookings by partner and status, with value in ₹ |
+| **Partners** | Add a lab or counseling partner (its API key and webhook secret are shown once), set its price list (price, home collection, turnaround per test), turn it off or on |
+| **Concerns** | Answer privacy concerns before their due date; the answer reaches the person in the app |
+| **Breaches** | Record a breach and notify the people affected; record when the Data Protection Board was informed and sent the report |
+| **Jobs & backups** | When each background job last ran and how it went; run any of them now |
+
+Everything the console does is also available as `/admin/...` API calls with the `X-Admin-Key` header.
+
 ## Background jobs
 
 With `FHG_SCHEDULER=on` (set in `render.yaml`) the web service runs its own jobs; nothing else to deploy.
@@ -18,7 +33,7 @@ Times are India time:
 
 Each job's last run is stored in the database, so a restart neither skips nor repeats a run. After a fresh install
 the daily jobs wait for their first scheduled time. Check them with `GET /admin/jobs` (admin key). The same jobs
-can be run by hand: `POST /admin/tasks/{care|reminders|housekeeping|backup}`.
+can be run by hand from the console, or with `POST /admin/jobs/{care|reminders|backup|housekeeping}/run`.
 
 Run exactly **one** instance with the scheduler on.
 
