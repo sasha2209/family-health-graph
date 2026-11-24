@@ -186,17 +186,16 @@ def notify_cascade(store: Store, user_id: str, categories: set[str],
         return 0
     notify = notify or store.notify
     sent = 0
-    names = ", ".join(sorted(CONCEPTS_BY_CATEGORY[c].display for c in categories))
+    from .notices import FAMILY_CASCADE, say
+
+    names = sorted(CONCEPTS_BY_CATEGORY[c].display for c in categories)
     for link in store.links_for(user_id):
         if link["i_share"] == "none":
             continue
         if only_relative and link["relative_id"] != only_relative:
             continue
-        notify(
-            link["relative_id"], "family_cascade",
-            f"Your {_label(link['i_am'])} shared a result that can run in families ({names}). "
-            "Your insights have been updated. This may affect what screening or testing is right "
-            "for you, so consider discussing it with your clinician or a genetic counselor.",
-        )
+        lang = store.user_lang(link["relative_id"]) if hasattr(store, "user_lang") else "en"
+        notify(link["relative_id"], "family_cascade",
+               say(lang, FAMILY_CASCADE, translate=("who", "conditions"), who=_label(link["i_am"]), conditions=names))
         sent += 1
     return sent

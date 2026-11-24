@@ -28,11 +28,11 @@ function greeting(t: (s: string) => string): string {
  */
 export default function HomeScreen() {
   const c = usePalette();
-  const { t } = useT();
+  const { t, lang } = useT();
   const { api } = useSession();
   const { data, error, refreshing, reload } = useLoader(async () => {
     const [report, notes, own, links, me, push, referrals, documents, myBookings, caring] = await Promise.all([
-      api.insights(), api.notifications(), api.profile(false), api.links(), api.me(), api.pushStatus(),
+      api.insights(lang), api.notifications(), api.profile(false), api.links(), api.me(), api.pushStatus(),
       api.referrals(), api.documents(), api.bookings(), api.care()]);
     const rels = new Set(own.family.map((m) => m.relationship));
     const steps: { title: string; detail: string; done: boolean; href: Href }[] = [

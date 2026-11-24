@@ -6,6 +6,7 @@ from collections import Counter
 from datetime import datetime, timezone
 
 from ..models import LEVEL_ORDER, HealthProfile, InsightReport
+from .lang import tr
 from .rules import ALL_RULES, Rule
 
 log = logging.getLogger(__name__)
@@ -48,5 +49,5 @@ def generate_insights(profile: HealthProfile, rules: list[Rule] | None = None) -
         generated_at=datetime.now(timezone.utc),
         insights=insights,
         pedigree=pedigree_summary(profile),
-        disclaimer=DISCLAIMER,
+        disclaimer=tr(DISCLAIMER),
     )

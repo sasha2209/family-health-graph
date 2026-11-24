@@ -22,13 +22,13 @@ const WHEN: Record<string, string> = {
 
 /** Detail page for one action item: why it was flagged, what to do, and the source guidance. */
 export default function InsightDetail() {
-  const { t } = useT();
+  const { t, lang } = useT();
   const { id } = useLocalSearchParams<{ id: string }>();
   const c = usePalette();
   const { api } = useSession();
   const { data, error, reload } = useLoader(async () => {
     const [report, referrals, tests, risk] = await Promise.all([
-      api.insights(), api.referrals(), api.insightTests(id), TREE_MODELS.has(id) ? api.risk() : Promise.resolve(null)]);
+      api.insights(lang), api.referrals(), api.insightTests(id), TREE_MODELS.has(id) ? api.risk(lang) : Promise.resolve(null)]);
     return { insight: report.insights.find((i) => i.rule_id === id) ?? null, disclaimer: report.disclaimer,
              referrals: referrals.filter((r) => r.rule_id === id), tests, risk };
   });
