@@ -1,0 +1,53 @@
+name: Mobile builds
+
+# Run by hand (Actions → Mobile builds → Run workflow). Needs the repository secret EXPO_TOKEN and the
+# variables APP_ID, EAS_PROJECT_ID and EXPO_OWNER (Settings → Secrets and variables → Actions). See docs/RELEASE.md.
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "preview = install links for testers; pilot = store builds"
+        type: choice
+        options: [preview, pilot]
+        default: preview
+      platform:
+        type: choice
+        options: [all, android, ios]
+        default: all
+      submit:
+        description: "Send pilot builds to TestFlight and Play internal testing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      APP_ID: ${{ vars.APP_ID }}
+      EAS_PROJECT_ID: ${{ vars.EAS_PROJECT_ID }}
+      EXPO_OWNER: ${{ vars.EXPO_OWNER }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+      - name: Check the configuration
+        run: |
+          test -n "$EXPO_TOKEN" || { echo "::error::Add the EXPO_TOKEN repository secret"; exit 1; }
+          test -n "$EAS_PROJECT_ID" || { echo "::error::Add the EAS_PROJECT_ID repository variable"; exit 1; }
+      - name: Build on EAS
+        run: >
+          npx --yes eas-cli@latest build --profile "${{ inputs.profile }}" --platform "${{ inputs.platform }}"
+          --non-interactive --no-wait
+          ${{ inputs.submit && inputs.profile == 'pilot' && '--auto-submit' || '' }}

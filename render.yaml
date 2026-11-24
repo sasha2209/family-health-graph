@@ -29,5 +29,48 @@ services:
       # FHG_SMTP_PASSWORD (as a secret) and FHG_EMAIL_FROM.
       - key: FHG_EMAIL_BACKEND
         value: console
+      # Push notifications to the phone apps. Switch to "expo" once the store builds exist (docs/RELEASE.md);
+      # FHG_EXPO_ACCESS_TOKEN (a secret) is optional unless "enhanced push security" is on in Expo.
       - key: FHG_PUSH_BACKEND
         value: console
+      - key: FHG_ENVIRONMENT
+        value: production
+      # Background jobs run inside this service (fhg/scheduler.py): hourly medicine reminders, daily test
+      # reminders, a nightly encrypted backup and housekeeping. Keep exactly one instance with this on.
+      - key: FHG_SCHEDULER
+        value: "on"
+      - key: FHG_BACKUP_DIR
+        value: /var/data/backups
+      # Copies on the same disk don't survive losing the disk: also send them off-site to S3-compatible storage
+      # (AWS S3, Cloudflare R2, Backblaze B2) by setting FHG_BACKUP_S3_BUCKET, FHG_BACKUP_S3_ENDPOINT (not for
+      # AWS), AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY (secrets) in the dashboard.
+      - key: FHG_BACKUP_S3_BUCKET
+        sync: false
+      # Error tracking with health data scrubbed out (fhg/monitoring.py): a Sentry or GlitchTip DSN.
+      - key: FHG_SENTRY_DSN
+        sync: false
+
+  # Staging: the same app from the `staging` branch, on the free plan. Its data resets on every deploy, which
+  # is what you want for trying changes before the pilot clinic sees them. Background jobs stay off.
+  - type: web
+    name: family-health-graph-staging
+    runtime: docker
+    plan: free
+    branch: staging
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: FHG_ENCRYPTION_KEY
+        generateValue: true
+      - key: FHG_AUTH_SECRET
+        generateValue: true
+      - key: FHG_PSEUDONYM_SECRET
+        generateValue: true
+      - key: FHG_ADMIN_KEY
+        generateValue: true
+      - key: FHG_EMAIL_BACKEND
+        value: console
+      - key: FHG_PUSH_BACKEND
+        value: console
+      - key: FHG_ENVIRONMENT
+        value: staging

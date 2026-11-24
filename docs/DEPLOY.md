@@ -23,6 +23,9 @@ One Docker service serves everything:
 
 Every push to `main` redeploys automatically.
 
+For running the pilot (background jobs, backups and restore drills, error tracking, uptime alerts, staging) see
+[RUNNING_IN_PRODUCTION.md](RUNNING_IN_PRODUCTION.md). For the phone apps see [RELEASE.md](RELEASE.md).
+
 ## Cost and plans
 
 `render.yaml` uses the **Starter** instance with a persistent disk, because the database (SQLite) must

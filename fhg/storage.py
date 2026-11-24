@@ -309,6 +309,13 @@ CREATE TABLE IF NOT EXISTS breaches (
     board_report_at TEXT,
     created_at TEXT NOT NULL
 );
+-- Background jobs (fhg/scheduler.py): when each last ran, and how it went.
+CREATE TABLE IF NOT EXISTS job_runs (
+    name TEXT PRIMARY KEY,
+    last_run_at TEXT NOT NULL,
+    status TEXT NOT NULL,
+    detail TEXT
+);
 CREATE TABLE IF NOT EXISTS nudges (
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     key TEXT NOT NULL,
@@ -699,6 +706,30 @@ class Store:
         return [{"id": r["id"], "partner_id": r["partner_id"], "partner_name": r["partner_name"],
                  "referral_id": r["referral_id"], "created_at": r["created_at"],
                  **json.loads(self._cipher.decrypt(r["data"]))} for r in rows]
+
+    # --- background jobs and backups -----------------------------------------------------------
+    def job_run(self, name: str) -> Optional[dict]:
+        rows = self._query("SELECT * FROM job_runs WHERE name = ?", (name,))
+        return dict(rows[0]) | {"detail": json.loads(rows[0]["detail"] or "{}")} if rows else None
+
+    def job_runs(self) -> list[dict]:
+        return [dict(r) | {"detail": json.loads(r["detail"] or "{}")} for r in self._query("SELECT * FROM job_runs ORDER BY name")]
+
+    def record_job_run(self, name: str, at: str, status: str, detail: dict) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("INSERT OR REPLACE INTO job_runs (name, last_run_at, status, detail) VALUES (?, ?, ?, ?)",
+                               (name, at, status, json.dumps(detail, default=str)[:4000]))
+
+    def backup(self, out_dir: str, key: str, keep: int, upload=None) -> dict:
+        from .backup import make_backup
+        with self._lock:
+            return make_backup(self._conn, out_dir, key, keep, upload)
+
+    def writable(self) -> bool:
+        with self._lock, self._conn:
+            self._conn.execute("INSERT OR REPLACE INTO job_runs (name, last_run_at, status, detail) VALUES "
+                               "('_health', ?, 'ok', NULL)", (_now(),))
+        return True
 
     # --- privacy rights (DPDP Act) -------------------------------------------------------------
     def set_nominee(self, user_id: str, data: Optional[dict]) -> None:
