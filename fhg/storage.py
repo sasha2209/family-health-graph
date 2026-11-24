@@ -708,6 +708,26 @@ class Store:
                  "referral_id": r["referral_id"], "created_at": r["created_at"],
                  **json.loads(self._cipher.decrypt(r["data"]))} for r in rows]
 
+    # --- operations overview (admin console) -----------------------------------------------------
+    def counts(self) -> dict:
+        one = lambda sql, *p: self._query(sql, p)[0][0]  # noqa: E731
+        return {
+            "users": one("SELECT COUNT(*) FROM users"),
+            "documents": one("SELECT COUNT(*) FROM documents"),
+            "care_circles": one("SELECT COUNT(DISTINCT owner_id || member_id) FROM care_circle"),
+            "caregivers": one("SELECT COUNT(*) FROM care_circle"),
+            "doses_logged_7d": one("SELECT COUNT(*) FROM dose_log WHERE at >= ?",
+                                   (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()),
+            "clinics": one("SELECT COUNT(*) FROM organizations"),
+            "partners_active": one("SELECT COUNT(*) FROM partners WHERE active = 1"),
+            "grievances_open": one("SELECT COUNT(*) FROM grievances WHERE status = 'open'"),
+            "grievances_overdue": one("SELECT COUNT(*) FROM grievances WHERE status = 'open' AND due_at < ?", _now()),
+            "breaches": one("SELECT COUNT(*) FROM breaches"),
+        }
+
+    def partner_catalogs(self) -> dict[str, list]:
+        return {r["id"]: json.loads(r["catalog"]) for r in self._query("SELECT id, catalog FROM partners WHERE catalog IS NOT NULL")}
+
     # --- language -------------------------------------------------------------------------------
     def set_user_lang(self, user_id: str, lang: str) -> None:
         with self._lock, self._conn:

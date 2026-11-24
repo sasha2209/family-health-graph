@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Pilot Operations</title>
+<style>
+  :root {
+    --bg: #f5f5f2; --surface: #fff; --text: #1d1d1b; --muted: #6b6b66; --border: #e3e2dc;
+    --accent: #2f6f62; --accent-ink: #fff; --accent-soft: #e6f0ed;
+    --high: #b4442f; --high-bg: #fbeeea; --mod: #8a5d0d; --mod-bg: #fbf3e2; --info: #3d6191; --info-bg: #ecf1f8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161715; --surface: #1f201e; --text: #ecebe6; --muted: #a09f98; --border: #33342f;
+      --accent: #5fb3a1; --accent-ink: #0d1a17; --accent-soft: #1d2f2b;
+      --high: #f08a74; --high-bg: #3a2420; --mod: #e2b45c; --mod-bg: #362c19; --info: #8fb0e0; --info-bg: #1f2a3a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #161715; --surface: #1f201e; --text: #ecebe6; --muted: #a09f98; --border: #33342f;
+    --accent: #5fb3a1; --accent-ink: #0d1a17; --accent-soft: #1d2f2b;
+    --high: #f08a74; --high-bg: #3a2420; --mod: #e2b45c; --mod-bg: #362c19; --info: #8fb0e0; --info-bg: #1f2a3a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 16px; display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; } .env { font: 600 11px/1 ui-monospace, Menlo, monospace; text-transform: uppercase; letter-spacing: .06em; padding: 4px 8px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); }
+  .env.staging, .env.development { background: var(--mod-bg); color: var(--mod); }
+  nav { display: flex; gap: 4px; flex-wrap: wrap; }
+  nav button { border: 0; background: none; padding: 8px 10px; border-radius: 8px; color: var(--muted); }
+  nav button[aria-current="page"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; min-width: 0; }
+  .card h2 { font-size: 15px; margin: 0 0 10px; }
+  .muted { color: var(--muted); } .small { font-size: 12.5px; }
+  input, select, textarea { font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); max-width: 100%; }
+  textarea { width: 100%; min-height: 64px; }
+  button { font: inherit; border-radius: 8px; padding: 8px 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  button.danger { color: var(--high); border-color: var(--high); }
+  button:disabled { opacity: .6; cursor: default; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row > * { min-width: 0; max-width: 100%; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+  label.f { display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .tile .n { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; } .tile .l { color: var(--muted); font-size: 13px; }
+  .tile.alert .n { color: var(--high); }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 99px; text-transform: uppercase; letter-spacing: .03em; }
+  .b-ok { background: var(--accent-soft); color: var(--accent); } .b-bad { background: var(--high-bg); color: var(--high); }
+  .b-warn { background: var(--mod-bg); color: var(--mod); } .b-none { background: var(--bg); color: var(--muted); }
+  .secret { font: 13px/1.4 ui-monospace, Menlo, monospace; word-break: break-all; background: var(--mod-bg); border: 1px solid var(--mod); border-radius: 8px; padding: 10px; }
+  .msg { padding: 10px 12px; border-radius: 8px; background: var(--info-bg); color: var(--info); }
+  .err { padding: 10px 12px; border-radius: 8px; background: var(--high-bg); color: var(--high); }
+  [hidden] { display: none !important; }
+  @media (max-width: 600px) { th.hide-s, td.hide-s { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="row"><h1>Pilot operations</h1><span id="env" class="env" hidden></span></div>
+  <nav id="tabs" hidden>
+    <button data-tab="overview" aria-current="page">Overview</button>
+    <button data-tab="partners">Partners</button>
+    <button data-tab="grievances">Concerns</button>
+    <button data-tab="breaches">Breaches</button>
+    <button data-tab="jobs">Jobs &amp; backups</button>
+    <button id="signout">Sign out</button>
+  </nav>
+</header>
+<main>
+  <section id="login" class="card" style="max-width:440px">
+    <h2>Sign in</h2>
+    <p class="muted small">Use the service's admin key (FHG_ADMIN_KEY in Render → Environment). It stays in this browser
+      tab only and is cleared when the tab closes.</p>
+    <form id="login-form" class="row">
+      <input id="key" type="password" autocomplete="off" placeholder="Admin key" aria-label="Admin key" style="flex:1" required>
+      <button class="primary">Open</button>
+    </form>
+    <div id="login-err" class="err" hidden style="margin-top:10px"></div>
+  </section>
+
+  <div id="notice" hidden></div>
+
+  <section data-panel="overview" hidden>
+    <div class="tiles" id="tiles"></div>
+    <div class="card" style="margin-top:14px">
+      <h2>Test bookings</h2>
+      <div class="table-wrap"><table id="bookings"><thead><tr><th>Partner</th><th>Status</th><th class="num">Bookings</th><th class="num">Value</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+
+  <section data-panel="partners" hidden>
+    <div class="card">
+      <h2>Add a partner</h2>
+      <form id="partner-form" class="grid2">
+        <label class="f">Name<input name="name" required minlength="2" placeholder="Thyro Labs, Pune"></label>
+        <label class="f">Kind<select name="kind" id="kinds"></select></label>
+        <label class="f">Webhook URL (optional)<input name="webhook_url" type="url" placeholder="https://partner.example/hooks"></label>
+        <div class="row" style="align-items:end"><button class="primary">Create partner</button></div>
+      </form>
+      <div id="new-partner" class="secret" hidden style="margin-top:12px"></div>
+    </div>
+    <div class="card">
+      <h2>Partners</h2>
+      <div class="table-wrap"><table id="partners"><thead><tr><th>Name</th><th class="hide-s">Kind</th><th>Tests offered</th><th>Status</th><th></th></tr></thead><tbody></tbody></table></div>
+    </div>
+    <div class="card" id="catalog-card" hidden>
+      <h2 id="catalog-title">Price list</h2>
+      <p class="muted small">What families see under “Get tested”. Leave a price empty if it isn't offered.</p>
+      <div class="table-wrap"><table id="catalog"><thead><tr><th>Test</th><th>Price (₹)</th><th>Home collection</th><th>Results in (days)</th></tr></thead><tbody></tbody></table></div>
+      <div class="row" style="margin-top:10px"><button class="primary" id="catalog-save">Save price list</button><button id="catalog-close">Close</button></div>
+    </div>
+  </section>
+
+  <section data-panel="grievances" hidden>
+    <div class="card">
+      <h2>Privacy concerns</h2>
+      <p class="muted small">Answer each before its due date. The answer goes to the person in the app.</p>
+      <div class="row" style="margin-bottom:10px"><select id="g-status" aria-label="Show"><option value="open">Open</option><option value="resolved">Answered</option></select></div>
+      <div id="grievances"></div>
+    </div>
+  </section>
+
+  <section data-panel="breaches" hidden>
+    <div class="card">
+      <h2>Record a personal data breach</h2>
+      <p class="muted small">Everyone affected gets this notice in the app. Inform the Data Protection Board separately and record it below.</p>
+      <form id="breach-form" class="grid2">
+        <label class="f" style="grid-column:1/-1">What happened<textarea name="nature" required minlength="5"></textarea></label>
+        <label class="f">Information affected (comma-separated)<input name="data_affected" required placeholder="email addresses, phone numbers"></label>
+        <label class="f">Detected at<input name="detected_at" type="datetime-local" required></label>
+        <label class="f">Occurred at (if known)<input name="occurred_at" type="datetime-local"></label>
+        <label class="f" style="grid-column:1/-1">What this may mean for them<textarea name="likely_consequences" required minlength="5"></textarea></label>
+        <label class="f" style="grid-column:1/-1">What we've done<textarea name="measures_taken" required minlength="5"></textarea></label>
+        <label class="f" style="grid-column:1/-1">What they can do<textarea name="what_you_can_do" required minlength="5"></textarea></label>
+        <label class="f">Affected user IDs (one per line), or<textarea name="affected_user_ids" placeholder="u_…"></textarea></label>
+        <label class="row small"><input type="checkbox" name="all_users"> Everyone</label>
+        <div class="row" style="grid-column:1/-1"><button class="primary">Record and notify</button></div>
+      </form>
+    </div>
+    <div class="card">
+      <h2>Breach register</h2>
+      <div class="table-wrap"><table id="breaches"><thead><tr><th>Detected</th><th>What happened</th><th class="num">People</th><th>Board informed</th><th>Report sent</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+
+  <section data-panel="jobs" hidden>
+    <div class="card">
+      <h2>Background jobs</h2>
+      <p class="muted small" id="sched-note"></p>
+      <div class="table-wrap"><table id="jobs"><thead><tr><th>Job</th><th>Last run</th><th>Status</th><th class="hide-s">Detail</th><th></th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+</main>
+
+<script>
+(() => {
+  const $ = (s, el = document) => el.querySelector(s);
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const when = (iso) => (iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—');
+  const inr = (n) => '₹' + Math.round(n || 0).toLocaleString('en-IN');
+  let key = null;
+  try { key = sessionStorage.getItem('fhg_admin'); } catch { /* storage blocked */ }
+  let meta = { tests: {}, partner_kinds: [] };
+  let partnersCache = [];
+
+  async function api(path, opts = {}) {
+    const res = await fetch(path, { ...opts, headers: { 'Content-Type': 'application/json', 'X-Admin-Key': key || '', ...(opts.headers || {}) } });
+    const body = res.status === 204 ? null : await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const d = body && body.detail;
+      throw new Error(typeof d === 'string' ? d : Array.isArray(d) ? d.map((x) => x.msg).join('; ') : res.statusText);
+    }
+    return body;
+  }
+  function notice(text, bad = false) {
+    const n = $('#notice'); n.className = bad ? 'err' : 'msg'; n.textContent = text; n.hidden = false;
+    clearTimeout(notice.t); notice.t = setTimeout(() => { n.hidden = true; }, 6000);
+  }
+  const guard = (fn) => async (...a) => { try { await fn(...a); } catch (e) { notice(e.message, true); } };
+
+  // --- navigation ---
+  function show(tab) {
+    document.querySelectorAll('[data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== tab; });
+    document.querySelectorAll('nav [data-tab]').forEach((b) => {
+      if (b.dataset.tab === tab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+    });
+    ({ overview: loadOverview, partners: loadPartners, grievances: loadGrievances, breaches: loadBreaches, jobs: loadJobs })[tab]();
+  }
+  $('#tabs').addEventListener('click', (e) => { const t = e.target.closest('[data-tab]'); if (t) show(t.dataset.tab); });
+  $('#signout').addEventListener('click', () => { try { sessionStorage.removeItem('fhg_admin'); } catch { /* ignore */ } location.reload(); });
+
+  async function start() {
+    meta = await api('/admin/overview');
+    $('#login').hidden = true; $('#tabs').hidden = false;
+    const env = $('#env'); env.textContent = meta.environment; env.className = 'env ' + meta.environment; env.hidden = false;
+    $('#kinds').innerHTML = meta.partner_kinds.map((k) => `<option value="${esc(k)}">${esc(k.replace(/_/g, ' '))}</option>`).join('');
+    show('overview');
+  }
+  $('#login-form').addEventListener('submit', async (e) => {
+    e.preventDefault(); key = $('#key').value.trim();
+    try { await start(); try { sessionStorage.setItem('fhg_admin', key); } catch { /* ignore */ } $('#key').value = ''; }
+    catch (err) { const el = $('#login-err'); el.textContent = err.message; el.hidden = false; key = null; }
+  });
+
+  // --- overview ---
+  const loadOverview = guard(async () => {
+    meta = await api('/admin/overview');
+    const c = meta.counts;
+    const tiles = [['Families', c.users], ['Documents', c.documents], ['Care circles', c.care_circles],
+      ['Doses marked (7 days)', c.doses_logged_7d], ['Clinics', c.clinics], ['Active partners', c.partners_active],
+      ['Open concerns', c.grievances_open, c.grievances_overdue ? `${c.grievances_overdue} overdue` : ''], ['Breaches', c.breaches]];
+    $('#tiles').innerHTML = tiles.map(([l, n, extra]) =>
+      `<div class="tile ${extra ? 'alert' : ''}"><div class="n">${esc(n)}</div><div class="l">${esc(l)}${extra ? ` · <strong>${esc(extra)}</strong>` : ''}</div></div>`).join('');
+    $('#bookings tbody').innerHTML = meta.bookings.length ? meta.bookings.map((b) =>
+      `<tr><td>${esc(b.partner)}</td><td>${esc(b.status.replace(/_/g, ' '))}</td><td class="num">${esc(b.n)}</td><td class="num">${inr(b.value_inr)}</td></tr>`).join('')
+      : '<tr><td colspan="4" class="muted">No bookings yet.</td></tr>';
+  });
+
+  // --- partners & price lists ---
+  const loadPartners = guard(async () => {
+    partnersCache = await api('/admin/partners');
+    $('#partners tbody').innerHTML = partnersCache.length ? partnersCache.map((p) => `<tr>
+      <td><strong>${esc(p.name)}</strong><div class="muted small">${esc(p.id)}</div></td>
+      <td class="hide-s">${esc(p.kind.replace(/_/g, ' '))}</td>
+      <td>${p.catalog.length ? p.catalog.map((i) => esc(meta.tests[i.test] ? meta.tests[i.test].split(' (')[0] : i.test) + (i.price_inr != null ? ` ${inr(i.price_inr)}` : '')).join(', ') : '<span class="muted">—</span>'}</td>
+      <td>${p.active ? '<span class="badge b-ok">Active</span>' : '<span class="badge b-none">Off</span>'}</td>
+      <td class="row"><button data-act="catalog" data-id="${esc(p.id)}">Price list</button>
+        <button data-act="${p.active ? 'deactivate' : 'activate'}" data-id="${esc(p.id)}" class="${p.active ? 'danger' : ''}">${p.active ? 'Turn off' : 'Turn on'}</button></td></tr>`).join('')
+      : '<tr><td colspan="5" class="muted">No partners yet.</td></tr>';
+  });
+  $('#partners').addEventListener('click', guard(async (e) => {
+    const b = e.target.closest('button[data-act]'); if (!b) return;
+    const p = partnersCache.find((x) => x.id === b.dataset.id);
+    if (b.dataset.act === 'catalog') return openCatalog(p);
+    if (b.dataset.act === 'deactivate' && !confirm(`Turn off ${p.name}? Families stop seeing their tests and they lose API access.`)) return;
+    await api(`/admin/partners/${encodeURIComponent(p.id)}/${b.dataset.act}`, { method: 'POST' });
+    notice(`${p.name} turned ${b.dataset.act === 'activate' ? 'on' : 'off'}.`); loadPartners();
+  }));
+  $('#partner-form').addEventListener('submit', guard(async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const out = await api('/admin/partners', { method: 'POST', body: JSON.stringify({ name: f.get('name'), kind: f.get('kind'), webhook_url: f.get('webhook_url') || null }) });
+    const box = $('#new-partner');
+    box.innerHTML = `<strong>Copy these now; they are shown only once.</strong><br>API key: ${esc(out.api_key)}<br>Webhook secret: ${esc(out.webhook_secret)}`;
+    box.hidden = false; e.target.reset(); loadPartners();
+  }));
+  let editing = null;
+  function openCatalog(p) {
+    editing = p;
+    const have = Object.fromEntries(p.catalog.map((i) => [i.test, i]));
+    $('#catalog-title').textContent = `Price list: ${p.name}`;
+    $('#catalog tbody').innerHTML = Object.entries(meta.tests).map(([code, name]) => {
+      const i = have[code] || {};
+      return `<tr data-test="${esc(code)}"><td>${esc(name)}</td>
+        <td><input type="number" min="0" step="1" value="${esc(i.price_inr ?? '')}" aria-label="Price for ${esc(name)}" style="width:110px"></td>
+        <td><input type="checkbox" ${i.home_collection ? 'checked' : ''} aria-label="Home collection for ${esc(name)}"></td>
+        <td><input type="number" min="0" max="60" value="${esc(i.turnaround_days ?? '')}" aria-label="Turnaround for ${esc(name)}" style="width:80px"></td></tr>`;
+    }).join('');
+    $('#catalog-card').hidden = false; $('#catalog-card').scrollIntoView({ behavior: 'smooth' });
+  }
+  $('#catalog-close').addEventListener('click', () => { $('#catalog-card').hidden = true; });
+  $('#catalog-save').addEventListener('click', guard(async () => {
+    const items = [...document.querySelectorAll('#catalog tbody tr')].map((tr) => {
+      const [price, home, days] = tr.querySelectorAll('input');
+      return price.value === '' ? null : { test: tr.dataset.test, price_inr: Number(price.value), home_collection: home.checked,
+        turnaround_days: days.value === '' ? null : Number(days.value) };
+    }).filter(Boolean);
+    await api(`/admin/partners/${encodeURIComponent(editing.id)}/catalog`, { method: 'PUT', body: JSON.stringify(items) });
+    notice(`Saved ${items.length} test${items.length === 1 ? '' : 's'} for ${editing.name}.`);
+    $('#catalog-card').hidden = true; loadPartners();
+  }));
+
+  // --- grievances ---
+  const loadGrievances = guard(async () => {
+    const list = await api('/admin/grievances?status=' + $('#g-status').value);
+    $('#grievances').innerHTML = list.length ? list.map((g) => `<div class="card" style="margin-bottom:10px" data-id="${esc(g.id)}">
+      <div class="row" style="justify-content:space-between"><strong>${esc(g.category)}</strong>
+        ${g.status === 'open' ? `<span class="badge ${g.overdue ? 'b-bad' : 'b-warn'}">${g.overdue ? 'Overdue' : 'Due'} ${esc(when(g.due_at))}</span>` : '<span class="badge b-ok">Answered</span>'}</div>
+      <p>${esc(g.message)}</p><p class="muted small">Raised ${esc(when(g.created_at))} · person ${esc(g.user_id)}</p>
+      ${g.status === 'open' ? `<textarea aria-label="Answer" placeholder="Your answer, in plain words"></textarea>
+        <div class="row" style="margin-top:8px"><button class="primary" data-act="answer">Send answer</button></div>`
+        : `<p class="small"><strong>Answer:</strong> ${esc(g.response)}</p>`}</div>`).join('')
+      : `<p class="muted">Nothing ${$('#g-status').value === 'open' ? 'open' : 'answered yet'}.</p>`;
+  });
+  $('#g-status').addEventListener('change', loadGrievances);
+  $('#grievances').addEventListener('click', guard(async (e) => {
+    const b = e.target.closest('button[data-act="answer"]'); if (!b) return;
+    const card = b.closest('[data-id]'); const text = $('textarea', card).value.trim();
+    if (!text) throw new Error('Write an answer first.');
+    await api(`/admin/grievances/${encodeURIComponent(card.dataset.id)}/answer`, { method: 'POST', body: JSON.stringify({ response: text, status: 'resolved' }) });
+    notice('Answer sent.'); loadGrievances();
+  }));
+
+  // --- breaches ---
+  const loadBreaches = guard(async () => {
+    const list = await api('/admin/breaches');
+    const board = (b, stage, at) => at ? esc(when(at)) : `<button data-id="${esc(b.id)}" data-stage="${stage}">Mark done</button>`;
+    $('#breaches tbody').innerHTML = list.length ? list.map((b) => `<tr><td>${esc(when(b.detected_at))}</td><td>${esc(b.nature)}</td>
+      <td class="num">${esc(b.affected)}</td><td>${board(b, 'intimation', b.board_intimated_at)}</td><td>${board(b, 'report', b.board_report_at)}</td></tr>`).join('')
+      : '<tr><td colspan="5" class="muted">No breaches recorded.</td></tr>';
+  });
+  $('#breaches').addEventListener('click', guard(async (e) => {
+    const b = e.target.closest('button[data-stage]'); if (!b) return;
+    await api(`/admin/breaches/${encodeURIComponent(b.dataset.id)}/board/${b.dataset.stage}`, { method: 'POST' });
+    loadBreaches();
+  }));
+  $('#breach-form').addEventListener('submit', guard(async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const iso = (v) => (v ? new Date(v).toISOString() : null);
+    const ids = String(f.get('affected_user_ids') || '').split(/\s+/).filter(Boolean);
+    const all = f.get('all_users') === 'on';
+    if (!all && !ids.length) throw new Error('List the affected people, or tick Everyone.');
+    if (!confirm(`Send this notice to ${all ? 'every family' : `${ids.length} ${ids.length === 1 ? 'person' : 'people'}`}?`)) return;
+    const out = await api('/admin/breaches', { method: 'POST', body: JSON.stringify({
+      nature: f.get('nature'), data_affected: String(f.get('data_affected')).split(',').map((s) => s.trim()).filter(Boolean),
+      detected_at: iso(f.get('detected_at')), occurred_at: iso(f.get('occurred_at')),
+      likely_consequences: f.get('likely_consequences'), measures_taken: f.get('measures_taken'), what_you_can_do: f.get('what_you_can_do'),
+      affected_user_ids: all ? null : ids, all_users: all }) });
+    notice(`Recorded. ${out.notified} ${out.notified === 1 ? 'person' : 'people'} notified.`); e.target.reset(); loadBreaches();
+  }));
+
+  // --- jobs ---
+  const JOBS = { care: 'Medicine reminders (hourly)', reminders: 'Test reminders (daily 10:00)', backup: 'Backup (daily 02:30)', housekeeping: 'Housekeeping (daily 03:15)' };
+  const loadJobs = guard(async () => {
+    const data = await api('/admin/jobs');
+    $('#sched-note').textContent = data.scheduler ? 'Jobs run automatically on this service (India time).'
+      : 'The scheduler is off here (FHG_SCHEDULER), so jobs only run when started below.';
+    const byName = Object.fromEntries(data.jobs.map((j) => [j.name, j]));
+    $('#jobs tbody').innerHTML = Object.entries(JOBS).map(([name, label]) => {
+      const j = byName[name];
+      const badge = !j ? '<span class="badge b-none">Never</span>' : j.status === 'ok' ? '<span class="badge b-ok">OK</span>'
+        : j.status === 'error' ? '<span class="badge b-bad">Failed</span>' : `<span class="badge b-warn">${esc(j.status)}</span>`;
+      const detail = j ? Object.entries(j.detail || {}).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' · ') : '';
+      return `<tr><td>${esc(label)}</td><td>${esc(when(j && j.last_run_at))}</td><td>${badge}</td><td class="hide-s small">${esc(detail)}</td>
+        <td><button data-job="${esc(name)}">Run now</button></td></tr>`;
+    }).join('');
+  });
+  $('#jobs').addEventListener('click', guard(async (e) => {
+    const b = e.target.closest('button[data-job]'); if (!b) return;
+    b.disabled = true;
+    try { const out = await api(`/admin/jobs/${b.dataset.job}/run`, { method: 'POST' }); notice(`${JOBS[b.dataset.job]}: ${JSON.stringify(out)}`); }
+    finally { b.disabled = false; loadJobs(); }
+  }));
+
+  if (key) start().catch(() => { key = null; try { sessionStorage.removeItem('fhg_admin'); } catch { /* ignore */ } });
+})();
+</script>
+</body>
+</html>
