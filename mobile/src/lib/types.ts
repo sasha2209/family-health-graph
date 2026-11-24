@@ -329,7 +329,8 @@ export interface CareInfo {
   hospital: string | null; notes: string | null;
 }
 export interface CareSummary {
-  care_id: string; role: 'owner' | 'caregiver'; name: string; relationship: string; today: Dose[]; refills_due: number;
+  care_id: string; role: 'owner' | 'caregiver'; name: string; relationship: string; relationship_code: string;
+  has_name: boolean; today: Dose[]; refills_due: number;
 }
 export interface CareDetail extends Omit<CareSummary, 'refills_due'> {
   member_id: string;

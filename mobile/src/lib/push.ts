@@ -7,6 +7,7 @@ import { useEffect } from 'react';
 import { Platform } from 'react-native';
 
 import type { Api } from './api';
+import { N } from './translate';
 
 const native = Platform.OS === 'ios' || Platform.OS === 'android';
 
@@ -26,13 +27,13 @@ function projectId(): string | undefined {
 
 /** Whether this install can receive push notifications, and if not, why. */
 export function pushSupport(): { ok: true } | { ok: false; reason: string } {
-  if (!native) return { ok: false, reason: 'Family alerts by notification are available in the phone app.' };
-  if (!Device.isDevice) return { ok: false, reason: 'Push notifications need a physical phone.' };
+  if (!native) return { ok: false, reason: N('Family alerts by notification are available in the phone app.') };
+  if (!Device.isDevice) return { ok: false, reason: N('Push notifications need a physical phone.') };
   if (Platform.OS === 'android' && Constants.executionEnvironment === ExecutionEnvironment.StoreClient) {
-    return { ok: false, reason: 'Expo Go on Android can’t receive push notifications. Use a development build.' };
+    return { ok: false, reason: N('Expo Go on Android can’t receive push notifications. Use a development build.') };
   }
   if (!projectId()) {
-    return { ok: false, reason: 'Push isn’t set up for this build yet (run “eas init” to add a project ID).' };
+    return { ok: false, reason: N('Push isn’t set up for this build yet (run “eas init” to add a project ID).') };
   }
   return { ok: true };
 }

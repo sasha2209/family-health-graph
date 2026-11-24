@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AppLockProvider } from '../lib/appLock';
+import { LanguageProvider, useT } from '../lib/i18n';
 import { usePushNotifications } from '../lib/push';
 import { SessionProvider, useSession } from '../lib/session';
 import { usePalette } from '../lib/theme';
@@ -10,6 +11,7 @@ import { usePalette } from '../lib/theme';
 function RootStack() {
   const { ready, token, api } = useSession();
   const c = usePalette();
+  const { t } = useT();
   usePushNotifications(api, !!token);
   if (!ready) return null; // keep the splash screen up until we know if there's a session
 
@@ -24,25 +26,25 @@ function RootStack() {
     >
       <Stack.Protected guard={!!token} redirectTo="/welcome">
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="insight/[id]" options={{ title: 'Action item' }} />
-        <Stack.Screen name="add-history" options={{ title: 'Add health information', presentation: 'modal' }} />
-        <Stack.Screen name="document/[id]" options={{ title: 'Document' }} />
-        <Stack.Screen name="person/[id]" options={{ title: 'Relative' }} />
-        <Stack.Screen name="results" options={{ title: 'Your results' }} />
-        <Stack.Screen name="connections" options={{ title: 'Connected records' }} />
-        <Stack.Screen name="book" options={{ title: 'Book a test' }} />
-        <Stack.Screen name="care" options={{ title: 'Caregiver mode' }} />
-        <Stack.Screen name="privacy" options={{ title: 'Your privacy' }} />
-        <Stack.Screen name="authorize" options={{ title: 'Share your family history', headerBackVisible: false }} />
+        <Stack.Screen name="insight/[id]" options={{ title: t('Action item') }} />
+        <Stack.Screen name="add-history" options={{ title: t('Add health information'), presentation: 'modal' }} />
+        <Stack.Screen name="document/[id]" options={{ title: t('Document') }} />
+        <Stack.Screen name="person/[id]" options={{ title: t('Relative') }} />
+        <Stack.Screen name="results" options={{ title: t('Your results') }} />
+        <Stack.Screen name="connections" options={{ title: t('Connected records') }} />
+        <Stack.Screen name="book" options={{ title: t('Book a test') }} />
+        <Stack.Screen name="care" options={{ title: t('Caregiver mode') }} />
+        <Stack.Screen name="privacy" options={{ title: t('Your privacy') }} />
+        <Stack.Screen name="authorize" options={{ title: t('Share your family history'), headerBackVisible: false }} />
       </Stack.Protected>
       <Stack.Protected guard={!token} redirectTo="/">
         <Stack.Screen name="welcome" options={{ headerShown: false }} />
       </Stack.Protected>
       {/* Reachable signed in or out: invite links open here, and sign-in also links an email. */}
-      <Stack.Screen name="invite/[token]" options={{ title: 'Family invitation' }} />
-      <Stack.Screen name="sign-in" options={{ title: 'Sign in' }} />
-      <Stack.Screen name="clinic/[code]" options={{ title: 'Share with your clinic' }} />
-      <Stack.Screen name="care-join/[token]" options={{ title: 'Care circle' }} />
+      <Stack.Screen name="invite/[token]" options={{ title: t('Family invitation') }} />
+      <Stack.Screen name="sign-in" options={{ title: t('Sign in') }} />
+      <Stack.Screen name="clinic/[code]" options={{ title: t('Share with your clinic') }} />
+      <Stack.Screen name="care-join/[token]" options={{ title: t('Care circle') }} />
     </Stack>
     </AppLockProvider>
   );
@@ -51,10 +53,12 @@ function RootStack() {
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
+      <LanguageProvider>
       <SessionProvider>
         <StatusBar style="auto" />
         <RootStack />
       </SessionProvider>
+      </LanguageProvider>
     </SafeAreaProvider>
   );
 }

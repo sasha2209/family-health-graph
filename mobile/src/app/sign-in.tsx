@@ -7,6 +7,7 @@ import { Body, Button, Card, ErrorText, Field, H2, Screen, styles } from '../com
 import { publicApi } from '../lib/api';
 import { useSession } from '../lib/session';
 import type { SignInResult } from '../lib/types';
+import { useT } from '../lib/i18n';
 
 const RESEND_SECONDS = 30;
 
@@ -16,6 +17,7 @@ const RESEND_SECONDS = 30;
  * it can be recovered and used on other devices.
  */
 export default function SignIn() {
+  const { t } = useT();
   const { mode } = useLocalSearchParams<{ mode?: string }>();
   const { token, api, signIn } = useSession();
   const linking = mode === 'link' && !!token;
@@ -68,17 +70,17 @@ export default function SignIn() {
   return (
     <Screen>
       <Card>
-        <H2>{linking ? 'Protect your account' : 'Sign in or create an account'}</H2>
+        <H2>{t(linking ? 'Protect your account' : 'Sign in or create an account')}</H2>
         <Body muted>
           {linking
-            ? 'Add your email so you can sign in on another phone and get your data back if you lose this one.'
-            : 'We’ll email you a 6-digit code. No password needed.'}
+            ? t('Add your email so you can sign in on another phone and get your data back if you lose this one.')
+            : t('We’ll email you a 6-digit code. No password needed.')}
         </Body>
 
         {step === 'email' ? (
           <>
             <Field
-              label="Email"
+              label={t('Email')}
               value={email}
               onChangeText={setEmail}
               autoCapitalize="none"
@@ -88,17 +90,17 @@ export default function SignIn() {
               textContentType="emailAddress"
               returnKeyType="send"
               onSubmitEditing={() => email.trim() && sendCode()}
-              placeholder="you@example.com"
+              placeholder={t('you@example.com')}
             />
             <View style={styles.row}>
-              <Button title="Send code" variant="primary" onPress={sendCode} busy={busy} disabled={!email.trim()} />
+              <Button title={t('Send code')} variant="primary" onPress={sendCode} busy={busy} disabled={!email.trim()} />
             </View>
           </>
         ) : (
           <>
             <Body style={{ marginTop: 12 }}>Enter the code we sent to {email.trim()}.</Body>
             <Field
-              label="6-digit code"
+              label={t('6-digit code')}
               value={code}
               onChangeText={(v) => {
                 const digits = v.replace(/\D/g, '').slice(0, 6);
@@ -114,9 +116,9 @@ export default function SignIn() {
             <View style={styles.row}>
               <Button title={linking ? 'Add email' : 'Sign in'} variant="primary" onPress={() => verify()}
                 busy={busy} disabled={code.length !== 6} />
-              <Button title={cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend code'} onPress={sendCode}
+              <Button title={cooldown > 0 ? t('Resend in {n}s', { n: cooldown }) : t('Resend code')} onPress={sendCode}
                 disabled={cooldown > 0 || busy} />
-              <Button title="Change email" onPress={() => { setStep('email'); setError(null); }} />
+              <Button title={t('Change email')} onPress={() => { setStep('email'); setError(null); }} />
             </View>
           </>
         )}

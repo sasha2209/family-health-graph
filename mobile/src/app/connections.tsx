@@ -7,18 +7,20 @@ import { formatDay } from '../lib/format';
 import { useSession } from '../lib/session';
 import type { Connection } from '../lib/types';
 import { useLoader } from '../lib/useLoader';
+import { useT } from '../lib/i18n';
 
-function summary(c: Connection) {
-  if (c.status === 'pending') return c.last_sync_summary?.waiting ?? 'Waiting for you to approve the request in your ABHA app';
-  if (c.status === 'denied' || c.status === 'revoked' || c.status === 'expired') return `Request ${c.status}. Disconnect and start again.`;
-  if (!c.last_sync_at) return 'Not synced yet';
+function summary(c: Connection, t: (s: string, v?: Record<string, string | number>) => string) {
+  if (c.status === 'pending') return t(c.last_sync_summary?.waiting ?? 'Waiting for you to approve the request in your ABHA app');
+  if (c.status === 'denied' || c.status === 'revoked' || c.status === 'expired') return t(`Request ${c.status}. Disconnect and start again.`);
+  if (!c.last_sync_at) return t('Not synced yet');
   const m = c.last_sync_summary?.merged ?? {};
   const added = (m.conditions ?? 0) + (m.medications ?? 0) + (m.observations ?? 0) + (m.relative_conditions ?? 0);
-  return `Synced ${formatDay(c.last_sync_at)} · ${added} new item${added === 1 ? '' : 's'}`;
+  return t(added === 1 ? 'Synced {date} · 1 new item' : 'Synced {date} · {n} new items', { date: formatDay(c.last_sync_at), n: added });
 }
 
 /** Patient portals connected over SMART on FHIR, and portals this server can connect to. */
 export default function ConnectionsScreen() {
+  const { t } = useT();
   const { api } = useSession();
   const { data, error, refreshing, reload } = useLoader(() => api.connections());
   const [busy, setBusy] = useState<string | null>(null);
@@ -39,20 +41,20 @@ export default function ConnectionsScreen() {
     <Screen refreshing={refreshing} onRefresh={reload}>
       {note && <Banner>{note}</Banner>}
       {data.connections.length > 0 && (
-        <Section title="Connected">
+        <Section title={t('Connected')}>
           {data.connections.map((c, i) => (
             <View key={c.id}>
-              <Row title={c.display_name} detail={c.status === 'error' ? 'Needs attention: sync again or reconnect' : summary(c)}
+              <Row title={c.display_name} detail={c.status === 'error' ? 'Needs attention: sync again or reconnect' : summary(c, t)}
  />
               <View style={[styles.row, { paddingHorizontal: 16, paddingBottom: 12, marginTop: 0 }]}>
-                <Button title="Sync now" busy={busy === `sync-${c.id}`} disabled={!!busy} onPress={() => run(`sync-${c.id}`, async () => {
+                <Button title={t('Sync now')} busy={busy === `sync-${c.id}`} disabled={!!busy} onPress={() => run(`sync-${c.id}`, async () => {
                   const r = await api.syncConnection(c.id);
                   const m = r.merged;
-                  setNote(r.message ?? `Synced. ${m ? `${(m.conditions ?? 0) + (m.relative_conditions ?? 0)} new diagnoses.` : ''}`.trim());
+                  setNote(r.message ? t(r.message) : m ? t('Synced. {n} new diagnoses.', { n: (m.conditions ?? 0) + (m.relative_conditions ?? 0) }) : t('Synced.'));
                   reload();
                 })} />
-                <Button title="Disconnect" variant="danger" disabled={!!busy} onPress={() => run(`del-${c.id}`, async () => {
-                  await api.deleteConnection(c.id); setNote(`Disconnected ${c.display_name}. Records already imported stay.`); reload();
+                <Button title={t('Disconnect')} variant="danger" disabled={!!busy} onPress={() => run(`del-${c.id}`, async () => {
+                  await api.deleteConnection(c.id); setNote(t('Disconnected {name}. Records already imported stay.', { name: c.display_name })); reload();
                 })} />
               </View>
             </View>
@@ -61,14 +63,14 @@ export default function ConnectionsScreen() {
       )}
 
       <Card>
-        <H2>Connect a patient portal</H2>
+        <H2>{t('Connect a patient portal')}</H2>
         {portals.length === 0 ? (
-          <Body muted>No hospital portals are set up on this server yet. You can still upload a record file from Add health information.</Body>
+          <Body muted>{t('No hospital portals are set up on this server yet. You can still upload a record file from Add health information.')}</Body>
         ) : (
           <>
-            <Body muted>You’ll sign in at the hospital’s own site and choose what to share. We only read your records.</Body>
+            <Body muted>{t('You’ll sign in at the hospital’s own site and choose what to share. We only read your records.')}</Body>
             {portals.every((p) => connected.has(p.id)) && (
-              <Body muted style={{ marginTop: 8 }}>All available portals are connected.</Body>
+              <Body muted style={{ marginTop: 8 }}>{t('All available portals are connected.')}</Body>
             )}
             {portals.filter((p) => !connected.has(p.id)).map((p) => (
               <View key={p.id} style={styles.row}>
@@ -85,17 +87,16 @@ export default function ConnectionsScreen() {
       </Card>
 
       <Card>
-        <H2>India: link your ABHA</H2>
+        <H2>{t('India: link your ABHA')}</H2>
         {data.available.some((p) => p.kind === 'abdm') ? (
           <>
             <Body muted>
-              Bring in records from hospitals and labs linked to ABDM. We send a request to your ABHA address; you see
-              exactly what&apos;s asked for and approve it in your ABHA app. You can withdraw it there at any time.
+              {t('Bring in records from hospitals and labs linked to ABDM. We send a request to your ABHA address; you see exactly what’s asked for and approve it in your ABHA app. You can withdraw it there at any time.')}
             </Body>
-            <Field label="ABHA address" value={abha} onChangeText={setAbha} placeholder="name@abdm"
+            <Field label={t('ABHA address')} value={abha} onChangeText={setAbha} placeholder={t('name@abdm')}
                    autoCapitalize="none" autoCorrect={false} />
             <View style={styles.row}>
-              <Button title="Send request" variant="primary" busy={busy === 'abha'} disabled={!!busy || !abha.includes('@')}
+              <Button title={t('Send request')} variant="primary" busy={busy === 'abha'} disabled={!!busy || !abha.includes('@')}
                       onPress={() => run('abha', async () => {
                         const r = await api.connectAbha(abha.trim());
                         setNote(r.message); setAbha(''); reload();
@@ -104,8 +105,7 @@ export default function ConnectionsScreen() {
           </>
         ) : (
           <Body muted>
-            Download a record from the ABHA app or your hospital (a .json health record file, or the PDF), then add it from
-            Add health information → Choose file. Linking your ABHA directly needs this server to be connected to ABDM.
+            {t('Download a record from the ABHA app or your hospital (a .json health record file, or the PDF), then add it from Add health information → Choose file. Linking your ABHA directly needs this server to be connected to ABDM.')}
           </Body>
         )}
       </Card>

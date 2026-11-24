@@ -7,10 +7,11 @@ import { Body, Button, ErrorText, Loading, Screen, styles } from '../components/
 import { useSession } from '../lib/session';
 import { usePalette } from '../lib/theme';
 import { useLoader } from '../lib/useLoader';
+import { N, useT } from '../lib/i18n';
 
 const KIND: Record<string, string> = {
-  genetic_counseling: 'Genetic counseling service', genetic_testing: 'Genetic testing company', lab: 'Laboratory',
-  specialist: 'Specialist', prevention_program: 'Prevention program', other: 'Health service',
+  genetic_counseling: N('Genetic counseling service'), genetic_testing: N('Genetic testing company'), lab: N('Laboratory'),
+  specialist: N('Specialist'), prevention_program: N('Prevention program'), other: N('Health service'),
 };
 
 function go(url: string) {
@@ -20,6 +21,7 @@ function go(url: string) {
 
 /** The consent screen a partner app sends people to ("Connect with Family Health Graph"). */
 export default function AuthorizeScreen() {
+  const { t } = useT();
   const q = useLocalSearchParams<{ client_id: string; redirect_uri: string; scope: string; state?: string;
                                    code_challenge: string; code_challenge_method: string }>();
   const { api } = useSession();
@@ -52,12 +54,12 @@ export default function AuthorizeScreen() {
     <Screen>
       <View style={{ gap: 6 }}>
         <Text accessibilityRole="header" style={{ fontSize: 22, fontWeight: '700', color: c.text }}>
-          {data.partner.name} wants to read your family history
+          {t('{name} wants to read your family history', { name: data.partner.name })}
         </Text>
-        <Body muted>{KIND[data.partner.kind] ?? 'Health service'} · returns you to {host}</Body>
+        <Body muted>{t(KIND[data.partner.kind] ?? 'Health service')} · {t('returns you to {host}', { host })}</Body>
       </View>
 
-      <Section title="Choose what to share">
+      <Section title={t('Choose what to share')}>
         {data.scopes.map((s, i) => (
           <Row key={s.scope} title={s.description} leading={<Check done={!off.has(s.scope)} />}
                onPress={() => setOff((prev) => { const n = new Set(prev); if (n.has(s.scope)) n.delete(s.scope); else n.add(s.scope); return n; })}
@@ -66,14 +68,12 @@ export default function AuthorizeScreen() {
       </Section>
 
       <Body muted style={{ fontSize: 13 }}>
-        They can read only what you tick, for up to {Math.round(data.expires_in_days / 30)} months. They never see
-        relatives’ names, or anything a linked relative shared with you. You can remove their access any time in
-        Settings, and every time they read your record it shows in your activity log.
+        {t('They can read only what you tick, for up to {n} months. They never see relatives’ names, or anything a linked relative shared with you. You can remove their access any time in Settings, and every time they read your record it shows in your activity log.', { n: Math.round(data.expires_in_days / 30) })}
       </Body>
 
       <View style={styles.row}>
-        <Button title="Allow" variant="primary" busy={busy} disabled={busy || chosen.length === 0} onPress={() => decide(true)} />
-        <Button title="Don’t allow" disabled={busy} onPress={() => decide(false)} />
+        <Button title={t('Allow')} variant="primary" busy={busy} disabled={busy || chosen.length === 0} onPress={() => decide(true)} />
+        <Button title={t('Don’t allow')} disabled={busy} onPress={() => decide(false)} />
       </View>
       <ErrorText>{actionError}</ErrorText>
     </Screen>

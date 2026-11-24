@@ -5,11 +5,13 @@ import { Platform, View } from 'react-native';
 import { useSession } from '../lib/session';
 import { chooseFile, choosePhoto, type Picked, takePhoto } from '../lib/pickDocument';
 import { Body, Button, Card, ErrorText, H2, styles } from './ui';
+import { useT } from '../lib/i18n';
 
 /** "Snap a prescription or lab report": the fastest way to fill a record with real data. */
 export function ScanCard({ replace = false, subject, memberId, title }: {
   replace?: boolean; subject?: string; memberId?: string; title?: string;
 }) {
+  const { t } = useT();
   const { api } = useSession();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -34,25 +36,24 @@ export function ScanCard({ replace = false, subject, memberId, title }: {
 
   return (
     <Card>
-      <H2>{title ?? 'Add a prescription or lab report'}</H2>
+      <H2>{title ?? t('Add a prescription or lab report')}</H2>
       <Body muted>
-        Take a photo or upload a PDF. We read it, you check what we found, and only what you keep is added.
-        Works for your family’s documents too.
+        {t('Take a photo or upload a PDF. We read it, you check what we found, and only what you keep is added. Works for your family’s documents too.')}
       </Body>
       <View style={styles.row}>
         {Platform.OS !== 'web' && (
-          <Button title="Take photo" variant="primary" busy={busy === 'camera'} disabled={!!busy}
+          <Button title={t('Take photo')} variant="primary" busy={busy === 'camera'} disabled={!!busy}
                   onPress={() => go('camera', takePhoto)} />
         )}
-        <Button title={Platform.OS === 'web' ? 'Upload photo or PDF' : 'Choose file'}
+        <Button title={t(Platform.OS === 'web' ? 'Upload photo or PDF' : 'Choose file')}
                 variant={Platform.OS === 'web' ? 'primary' : 'secondary'}
                 busy={busy === 'file'} disabled={!!busy} onPress={() => go('file', chooseFile)} />
         {Platform.OS !== 'web' && (
-          <Button title="From photos" busy={busy === 'library'} disabled={!!busy}
+          <Button title={t('From photos')} busy={busy === 'library'} disabled={!!busy}
                   onPress={() => go('library', choosePhoto)} />
         )}
       </View>
-      {busy && <Body muted style={{ fontSize: 13, marginTop: 8 }}>Reading your document…</Body>}
+      {busy && <Body muted style={{ fontSize: 13, marginTop: 8 }}>{t('Reading your document…')}</Body>}
       <ErrorText>{error}</ErrorText>
     </Card>
   );

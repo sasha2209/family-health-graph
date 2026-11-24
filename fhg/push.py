@@ -40,6 +40,29 @@ PUSH_TEXT = {
 PUSH_URL = {"booking": "/", "reminder": "/", "documents_received": "/", "care": "/", "risk": "/",
             "privacy": "/privacy", "security": "/"}
 DEFAULT_TEXT = "You have a new update."
+# Lock-screen texts in the person's language (set in the app). Still no health details.
+PUSH_TEXT_I18N = {
+    "hi": {
+        "family_cascade": "एक रिश्तेदार ने स्वास्थ्य से जुड़ी ऐसी जानकारी साझा की है जो आप पर असर डाल सकती है।",
+        "invitation_accepted": "एक रिश्तेदार ने आपका आमंत्रण स्वीकार कर लिया।",
+        "referral": "आपकी देखभाल टीम ने आपके रेफ़रल में बदलाव किया है।",
+        "documents_received": "आपके फ़ॉरवर्ड किए दस्तावेज़ जाँच के लिए तैयार हैं।",
+        "booking": "आपकी टेस्ट बुकिंग के बारे में नई जानकारी है।",
+        "reminder": "एक स्वास्थ्य जाँच अभी बाकी है। बुक करने के लिए ऐप खोलें।",
+        "care": "जिनकी आप देखभाल करते हैं, उनके बारे में नई जानकारी है।",
+        "risk": "आपके जेनेटिक काउंसलर ने आपके नतीजे साझा किए हैं।",
+        "privacy": "आपके गोपनीयता सवाल का जवाब आ गया है।",
+        "security": "आपके खाते के बारे में ज़रूरी सुरक्षा सूचना।",
+        "_default": "आपके लिए नई जानकारी है।",
+    },
+}
+
+
+def push_text(kind: str, lang: str = "en") -> str:
+    table = PUSH_TEXT_I18N.get(lang)
+    if table:
+        return table.get(kind, table["_default"])
+    return PUSH_TEXT.get(kind, DEFAULT_TEXT)
 
 
 @dataclass
@@ -122,13 +145,14 @@ class Notifier:
         if not tokens:
             return
         target = url or PUSH_URL.get(kind, "/")
+        lang = self.store.user_lang(user_id) if hasattr(self.store, "user_lang") else "en"
         if self._pool:
-            self._pool.submit(self._push, tokens, kind, target)  # don't make the request wait on Expo
+            self._pool.submit(self._push, tokens, kind, target, lang)  # don't make the request wait on Expo
         else:
-            self._push(tokens, kind, target)
+            self._push(tokens, kind, target, lang)
 
-    def _push(self, tokens: list[str], kind: str, url: str = "/") -> None:
-        body = PUSH_TEXT.get(kind, DEFAULT_TEXT)
+    def _push(self, tokens: list[str], kind: str, url: str = "/", lang: str = "en") -> None:
+        body = push_text(kind, lang)
         messages = [PushMessage(t, TITLE, body, {"kind": kind, "url": url}) for t in tokens]
         try:
             invalid = self.sender.send(messages)

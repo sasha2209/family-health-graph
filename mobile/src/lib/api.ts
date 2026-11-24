@@ -151,6 +151,7 @@ export function createApi(token: string | null) {
     grants: () => authed<Grant[]>('/v1/grants'),
     revokeGrant: (id: string) => authed<void>(`/v1/grants/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     risk: () => authed<RiskReport>('/v1/risk'),
+    setLanguage: (lang: string) => authed<{ lang: string }>('/v1/profile/language', { method: 'PUT', body: { lang } }),
     care: () => authed<CareSummary[]>('/v1/care'),
     careDetail: (id: string) => authed<CareDetail>(`/v1/care/${encodeURIComponent(id)}`),
     careSetInfo: (id: string, body: CareInfo) =>
