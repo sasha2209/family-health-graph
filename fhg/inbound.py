@@ -89,6 +89,7 @@ def email_attachments(payload: dict) -> list[EmailAttachment]:
 class WhatsAppClient(Protocol):
     def download(self, media_id: str) -> bytes: ...
     def send_text(self, to: str, body: str) -> None: ...
+    def send_template(self, to: str, name: str, lang: str, params: list[str]) -> None: ...
 
 
 class GraphWhatsAppClient:
@@ -110,6 +111,14 @@ class GraphWhatsAppClient:
     def send_text(self, to: str, body: str) -> None:
         self._request(f"{GRAPH}/{self.phone_number_id}/messages", json.dumps({
             "messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": body}}).encode())
+
+    def send_template(self, to: str, name: str, lang: str, params: list[str]) -> None:
+        """A pre-approved template: the only way to message someone who hasn't written in the last 24 hours."""
+        template: dict = {"name": name, "language": {"code": lang}}
+        if params:
+            template["components"] = [{"type": "body", "parameters": [{"type": "text", "text": p} for p in params]}]
+        self._request(f"{GRAPH}/{self.phone_number_id}/messages", json.dumps({
+            "messaging_product": "whatsapp", "to": to, "type": "template", "template": template}).encode())
 
 
 def verify_meta_signature(app_secret: str, raw_body: bytes, header: Optional[str]) -> bool:

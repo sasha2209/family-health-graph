@@ -33,12 +33,45 @@ owner or in the circle.
 
 In the app: **Home → Caring for**, a relative's page → **Caregiver mode**, and invite links open `/app/care-join/<token>`.
 
+## Reminders on the parent's own WhatsApp
+
+For a parent who doesn't use the app, a caregiver can send the reminders to the parent's own WhatsApp (care screen →
+*Reminders on their WhatsApp*):
+
+1. **Set up.** The caregiver enters the number and the language (Hindi or English), and confirms the parent agreed.
+   `PUT /v1/care/{id}/whatsapp` sends the **invitation template**.
+2. **Opt in.** Nothing more is sent until the parent replies **YES** (or हाँ / haan).
+3. **Reminders.** At each dose time the hourly job sends the **reminder template**, once per slot, naming the
+   medicines.
+4. **Marking doses.** The parent replies **1** (or "taken", "ले ली", "ho gaya"). The doses for the latest open slot
+   are marked taken, and the family sees *marked by Asha (WhatsApp)*.
+5. **Stopping.** **STOP** (or रोको / बंद) ends the reminders. The family can also turn them off in the app
+   (`DELETE /v1/care/{id}/whatsapp`).
+6. **Unclear replies** get a short help message.
+
+The number is stored encrypted, and replies are matched by a keyed hash of it. Reminders carry only the person's
+own medicine names, sent to their own phone after they opted in.
+
+### Templates to submit to Meta (WhatsApp Manager → Message templates, category *Utility*)
+
+Template names are configurable: `FHG_WA_TEMPLATE_CARE_OPTIN` and `FHG_WA_TEMPLATE_CARE_REMINDER`.
+
+| Name | Language | Body |
+|---|---|---|
+| `care_optin` | English (`en`) | Your family has set up medicine reminders for you in Family Health Graph. Reply YES to get them here, or STOP to say no. |
+| `care_optin` | Hindi (`hi`) | आपके परिवार ने Family Health Graph में आपके लिए दवा के रिमाइंडर सेट किए हैं। इन्हें यहाँ पाने के लिए YES भेजें, या मना करने के लिए STOP भेजें। |
+| `medicine_reminder` | English (`en`) | Time for your {{1}} medicines: {{2}}. Reply 1 when you've taken them. |
+| `medicine_reminder` | Hindi (`hi`) | आपकी {{1}} की दवाइयों का समय: {{2}}। दवा लेने के बाद 1 भेजें। |
+
+`{{1}}` is the time of day (morning or सुबह) and `{{2}}` the medicine names. Replies within 24 hours of the parent's
+last message are free text (`fhg/care.py`, `WA_TEXT`).
+
 ## To go live
 
 - **Schedule the hourly job** (e.g. a Render cron job: `curl -X POST -H "X-Admin-Key: …" https://<host>/admin/tasks/care`),
   next to the daily `/admin/tasks/reminders`.
-- Turn on **push notifications** so reminders reach phones, not just the in-app list. A WhatsApp reminder template
-  would reach parents who don't use the app; it needs an approved Meta template.
+- Turn on **push notifications** so reminders reach phones, not just the in-app list.
+- Submit the two WhatsApp templates above for approval, so reminders can reach parents who don't use the app.
 - The hourly job loads every profile. That's fine for a pilot; past a few thousand users, keep an index of who has
   reminders on.
 - Reminder times are fixed (8 am, 2 pm, 9 pm IST). Per-family times are a small addition.
