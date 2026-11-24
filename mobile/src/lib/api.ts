@@ -15,6 +15,7 @@ import type {
   Activity,
   Booking,
   TestOffer,
+  RiskReport,
   Connection,
   Grant,
   OAuthRequestInfo,
@@ -57,7 +58,10 @@ async function requestText(path: string, token: string | null): Promise<string> 
   } catch {
     throw new ApiError(0, `Can't reach the server at ${API_URL}. Check your connection.`);
   }
-  if (!res.ok) throw new ApiError(res.status, res.statusText || 'Request failed');
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, typeof data?.detail === 'string' ? data.detail : res.statusText || 'Request failed');
+  }
   return res.text();
 }
 
@@ -129,6 +133,8 @@ export function createApi(token: string | null) {
       authed<{ redirect_to: string }>('/v1/oauth/deny', { method: 'POST', body }),
     grants: () => authed<Grant[]>('/v1/grants'),
     revokeGrant: (id: string) => authed<void>(`/v1/grants/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    risk: () => authed<RiskReport>('/v1/risk'),
+    canriskFile: () => requestText('/v1/risk/canrisk', token),
     insightTests: (ruleId: string) =>
       authed<{ tests: TestOffer[]; bookings: Booking[] }>(`/v1/insights/${encodeURIComponent(ruleId)}/tests`),
     book: (body: { partner_id: string; tests: string[]; rule_id?: string; preferred_date?: string; slot?: string;

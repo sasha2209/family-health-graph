@@ -26,6 +26,7 @@ from .models import HealthProfile, InsightReport, LEVEL_ORDER
 PROGRAMS: dict[str, str] = {
     "hboc_family_pattern": "Genetic counseling: hereditary breast/ovarian cancer",
     "colorectal_family_history": "Earlier colorectal screening / Lynch evaluation",
+    "lynch_criteria": "Genetic counseling: Lynch syndrome",
     "familial_hypercholesterolemia": "Lipid clinic: possible familial hypercholesterolemia",
     "premature_ascvd_family_history": "Cardiovascular risk assessment",
     "diabetes_risk": "Diabetes screening / prevention program",

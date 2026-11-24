@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
-from . import auth, bookings, clinic, i18n, inbound, partners, push, trends
+from . import auth, bookings, clinic, i18n, inbound, partners, push, risk_models, trends
 from .connectors import smart
 from . import partner_oauth as poauth
 from .clinician_report import render_html as clinician_report_html
@@ -308,6 +308,19 @@ class BookingStatusIn(BaseModel):
     status: str = Field(..., pattern="^(scheduled|sample_collected|completed|cancelled)$")
     scheduled_for: Optional[datetime] = None
     note: Optional[str] = Field(None, max_length=500)
+
+
+class RiskPredictionIn(BaseModel):
+    outcome: str = Field(min_length=1, max_length=120, description='e.g. "Breast cancer"')
+    probability_percent: float = Field(ge=0, le=100)
+    horizon: str = Field(max_length=60, description='e.g. "next 10 years", "lifetime (to age 80)"')
+    population_percent: Optional[float] = Field(None, ge=0, le=100, description="The same figure for the population")
+
+
+class RiskResultIn(BaseModel):
+    model: str = Field(min_length=1, max_length=80, description='e.g. "BOADICEA v6 (CanRisk)"')
+    predictions: list[RiskPredictionIn] = Field(min_length=1, max_length=20)
+    note: Optional[str] = Field(None, max_length=1000)
 
 
 class ReferralIn(BaseModel):
@@ -1268,6 +1281,29 @@ def create_app(settings: Optional[Settings] = None,
         store.audit(user_id, "system", "insights.summary", {"generated_by": result["generated_by"]})
         return result | {"disclaimer": report.disclaimer}
 
+    @app.get("/v1/risk")
+    def risk(user_id: str = Depends(current_user)) -> dict:
+        """Tree-based hereditary-risk models: Lynch syndrome criteria, the CanRisk export, and any risk figures
+        a counselor has shared."""
+        profile = effective_profile(store, user_id)
+        try:
+            out = risk_models.assess(profile)
+        except ValueError as exc:
+            out = {"needs": str(exc)}
+        return out | {"assessments": store.risk_results(user_id)}
+
+    @app.get("/v1/risk/canrisk", response_class=Response)
+    def risk_canrisk(user_id: str = Depends(current_user)) -> Response:
+        """Your family as a CanRisk 2.0 pedigree file, to give a genetic counselor. Contains no names."""
+        try:
+            text, warnings = risk_models.canrisk_file(effective_profile(store, user_id))
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        store.audit(user_id, "user", "risk.canrisk_export", {"warnings": len(warnings)})
+        return Response(text, media_type="text/plain; charset=utf-8", headers={
+            "Content-Disposition": 'attachment; filename="family-canrisk.txt"', "Cache-Control": "no-store",
+            "X-FHG-Warnings": json.dumps(warnings)[:4000]})
+
     @app.get("/v1/report/clinician", response_class=HTMLResponse)
     def clinician_report(include_shared: bool = Query(
             True, description="Include history that linked relatives share with you"),
@@ -1469,6 +1505,29 @@ def create_app(settings: Optional[Settings] = None,
                             f"{partner['name']} scheduled your appointment: {program}. "
                             "They or your clinic will be in touch with details.")
         return partner_view(partner, updated)
+
+    @app.get("/v1/partner/referrals/{referral_id}/canrisk", response_class=Response)
+    def partner_referral_canrisk(referral_id: str, partner: dict = Depends(current_partner)) -> Response:
+        """The referred person's family as a CanRisk 2.0 pedigree file (no names), to run BOADICEA in CanRisk."""
+        r = partner_referral_or_404(partner, referral_id)
+        try:
+            text, warnings = risk_models.canrisk_file(effective_profile(store, r["user_id"]))
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        store.audit(r["user_id"], f"partner:{partner['id']}", "partner.canrisk_export", {"partner": partner["name"]})
+        return Response(text, media_type="text/plain; charset=utf-8", headers={
+            "Content-Disposition": f'attachment; filename="canrisk-{referral_id}.txt"', "Cache-Control": "no-store",
+            "X-FHG-Warnings": json.dumps(warnings)[:4000]})
+
+    @app.post("/v1/partner/referrals/{referral_id}/risk-assessment", status_code=201)
+    def partner_risk_assessment(referral_id: str, body: RiskResultIn, partner: dict = Depends(current_partner)) -> dict:
+        """A counselor posts the risk figures they calculated; the person sees them in the app."""
+        r = partner_referral_or_404(partner, referral_id)
+        rid = store.add_risk_result(r["user_id"], partner["id"], referral_id, body.model_dump())
+        store.audit(r["user_id"], f"partner:{partner['id']}", "partner.risk_assessment",
+                    {"partner": partner["name"], "model": body.model})
+        notifier.notify(r["user_id"], "risk", f"{partner['name']} shared your {body.model} risk assessment.")
+        return {"id": rid}
 
     # --- platform admin: manage referral partners -------------------------------------------
     def require_admin(x_admin_key: Optional[str] = Header(None)) -> None:

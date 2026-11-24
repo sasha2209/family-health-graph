@@ -35,6 +35,7 @@ RECOMMENDED: dict[str, list[str]] = {
     "premature_ascvd_family_history": ["lipid_profile", "lipoprotein_a"],
     "hboc_family_pattern": ["genetic_counseling"],
     "colorectal_family_history": ["genetic_counseling"],
+    "lynch_criteria": ["genetic_counseling"],
 }
 
 ACTIVE = ("requested", "scheduled", "sample_collected")

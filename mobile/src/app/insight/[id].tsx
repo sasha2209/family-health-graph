@@ -1,12 +1,17 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { useState } from 'react';
 import { Linking, Pressable, Text, View } from 'react-native';
 
 import { Badge, Row, Section } from '../../components/list';
 import { Body, ErrorText, Loading, Screen } from '../../components/ui';
+import { shareCanRiskFile } from '../../lib/canrisk';
 import { BOOKING_LABEL, formatDay, REFERRAL_LABEL, rupees } from '../../lib/format';
 import { useSession } from '../../lib/session';
 import { LEVEL_LABEL, usePalette } from '../../lib/theme';
 import { useLoader } from '../../lib/useLoader';
+
+/** Action items where the family tree feeds a hereditary-risk model or calculator. */
+const TREE_MODELS = new Set(['hboc_family_pattern', 'colorectal_family_history', 'lynch_criteria']);
 
 const WHEN: Record<string, string> = {
   high: 'Worth raising with a clinician soon.',
@@ -20,13 +25,15 @@ export default function InsightDetail() {
   const c = usePalette();
   const { api } = useSession();
   const { data, error, reload } = useLoader(async () => {
-    const [report, referrals, tests] = await Promise.all([api.insights(), api.referrals(), api.insightTests(id)]);
+    const [report, referrals, tests, risk] = await Promise.all([
+      api.insights(), api.referrals(), api.insightTests(id), TREE_MODELS.has(id) ? api.risk() : Promise.resolve(null)]);
     return { insight: report.insights.find((i) => i.rule_id === id) ?? null, disclaimer: report.disclaimer,
-             referrals: referrals.filter((r) => r.rule_id === id), tests };
+             referrals: referrals.filter((r) => r.rule_id === id), tests, risk };
   });
+  const [shareError, setShareError] = useState<string | null>(null);
 
   if (!data) return <Screen>{error ? <ErrorText>{error}</ErrorText> : <Loading />}</Screen>;
-  const { insight, disclaimer, referrals, tests } = data;
+  const { insight, disclaimer, referrals, tests, risk } = data;
   const active = tests.bookings.filter((b) => ['requested', 'scheduled', 'sample_collected'].includes(b.status));
   if (!insight) {
     return <Screen><Body muted>This item no longer applies. Your record may have changed.</Body></Screen>;
@@ -67,6 +74,40 @@ export default function InsightDetail() {
       <Section title="What you can do">
         <View style={{ padding: 16 }}><Body>{insight.recommendation}</Body></View>
       </Section>
+
+      {risk && risk.assessments.length > 0 && (
+        <Section title="Your counselor's risk figures">
+          {risk.assessments.flatMap((a) => a.predictions.map((pr, i) => (
+            <Row key={`${a.id}-${i}`} title={`${pr.outcome}: ${pr.probability_percent}% ${pr.horizon}`}
+                 detail={[pr.population_percent != null ? `population ${pr.population_percent}%` : null,
+                          `${a.model} · ${a.partner_name} · ${new Date(a.created_at).toLocaleDateString()}`]
+                   .filter(Boolean).join(' · ')} />
+          )))}
+        </Section>
+      )}
+
+      {risk && TREE_MODELS.has(insight.rule_id) && (
+        <Section title="For your genetic counselor">
+          <View style={{ padding: 16, gap: 8 }}>
+            <Body>
+              Counselors calculate breast and ovarian cancer risk with BOADICEA in CanRisk. Your family tree can be
+              exported as a CanRisk file, with no names in it.
+            </Body>
+            {risk.needs ? <Body muted>{risk.needs}</Body> : (
+              <Pressable accessibilityRole="button" onPress={() => {
+                setShareError(null);
+                shareCanRiskFile(api).catch((e) => setShareError(e instanceof Error ? e.message : String(e)));
+              }}>
+                <Text style={{ color: c.accent, fontSize: 16, fontWeight: '600' }}>Share the CanRisk file</Text>
+              </Pressable>
+            )}
+            {risk.pedigree && risk.pedigree.not_placed.length > 0 && (
+              <Body muted style={{ fontSize: 13 }}>Not included: {risk.pedigree.not_placed.join('; ')}.</Body>
+            )}
+            {shareError && <ErrorText>{shareError}</ErrorText>}
+          </View>
+        </Section>
+      )}
 
       {tests.bookings.length > 0 && (
         <Section title="Your bookings">

@@ -283,3 +283,29 @@ export interface Booking {
   status: BookingStatus; preferred_date: string | null; slot: string | null; scheduled_for: string | null;
   price_inr: number | null; created_at: string; note: string | null;
 }
+
+// --- hereditary-risk models (/v1/risk) ---------------------------------------------------------
+export interface CriteriaResult {
+  model: string;
+  met: boolean;
+  criteria: string[];
+  evidence: string[];
+  not_assessable: string[];
+}
+
+export interface RiskAssessment {
+  id: string;
+  partner_name: string;
+  created_at: string;
+  model: string;
+  predictions: { outcome: string; probability_percent: number; horizon: string; population_percent: number | null }[];
+  note: string | null;
+}
+
+export interface RiskReport {
+  needs?: string;
+  pedigree?: { people: number; placeholders: number; not_placed: string[] };
+  lynch?: { amsterdam_ii: CriteriaResult; revised_bethesda: CriteriaResult[]; suggests_evaluation: boolean };
+  calculators?: { model: string; for: string; how: string; download: string }[];
+  assessments: RiskAssessment[];
+}
