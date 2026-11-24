@@ -1,0 +1,158 @@
+import { useState } from 'react';
+import { Platform, Pressable, Share, Text, View } from 'react-native';
+
+import { Row, Section } from '../components/list';
+import { Banner, Body, Button, Card, Chips, ErrorText, Field, H2, Loading, Screen, styles } from '../components/ui';
+import { formatDay } from '../lib/format';
+import { useSession } from '../lib/session';
+import { usePalette } from '../lib/theme';
+import { useLoader } from '../lib/useLoader';
+
+const CATEGORIES = ['access', 'correction', 'erasure', 'consent', 'sharing', 'security', 'other'] as const;
+type Category = (typeof CATEGORIES)[number];
+
+/** Your rights under India's data protection law: notice, what we hold, who has it, nominee, concerns, download. */
+export default function PrivacyScreen() {
+  const { api } = useSession();
+  const c = usePalette();
+  const [lang, setLang] = useState<'en' | 'hi'>('en');
+  const { data, error, refreshing, reload } = useLoader(async () => {
+    const [summary, en, hi] = await Promise.all([api.privacy(), api.privacyNotice('en'), api.privacyNotice('hi')]);
+    return { summary, notices: { en, hi } };
+  });
+  const [showNotice, setShowNotice] = useState(false);
+  const [nominee, setNominee] = useState<{ name: string; relationship: string; phone: string } | null>(null);
+  const [concern, setConcern] = useState<{ category: Category; message: string } | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const run = async (fn: () => Promise<void>) => {
+    setActionError(null);
+    try { await fn(); } catch (e) { setActionError(e instanceof Error ? e.message : String(e)); }
+  };
+
+  if (!data) return <Screen>{error ? <ErrorText>{error}</ErrorText> : <Loading />}</Screen>;
+  const { summary: s } = data;
+  const notice = data.notices[lang];
+
+  return (
+    <Screen refreshing={refreshing} onRefresh={reload}>
+      {note && <Banner>{note}</Banner>}
+      <ErrorText>{actionError}</ErrorText>
+      {s.minor && (
+        <Banner tone="high">
+          Because you&apos;re under 18, sharing with apps, labs, research and AI features stay off until a parent gives
+          verified consent.
+        </Banner>
+      )}
+
+      <Card>
+        <H2>{notice.title}</H2>
+        <Body>{notice.summary}</Body>
+        <View style={styles.row}>
+          <Button title={showNotice ? 'Hide the full notice' : 'Read the full notice'} onPress={() => setShowNotice(!showNotice)} />
+          <Button title={lang === 'en' ? 'हिंदी में पढ़ें' : 'Read in English'}
+                  onPress={() => { setLang(lang === 'en' ? 'hi' : 'en'); setShowNotice(true); }} />
+        </View>
+        {showNotice && notice.sections.map((sec) => (
+          <View key={sec.heading} style={{ marginTop: 14, gap: 4 }}>
+            <Text style={{ color: c.text, fontWeight: '700', fontSize: 15 }}>{sec.heading}</Text>
+            {sec.items.map((it) => (
+              <Body key={it.title} style={{ fontSize: 14 }}>
+                • {it.title}{it.detail ? <Text style={{ color: c.muted }}>: {it.detail}</Text> : null}
+              </Body>
+            ))}
+          </View>
+        ))}
+      </Card>
+
+      <Section title="What we hold">
+        {s.held.map((h, i) => <Row key={h.category} title={h.category} detail={h.detail} last={i === s.held.length - 1} />)}
+      </Section>
+
+      <Section title="Who has it">
+        {s.shared_with.length === 0 && <View style={{ padding: 16 }}><Body muted>No one. Nothing has been shared.</Body></View>}
+        {s.shared_with.map((x, i) => (
+          <Row key={`${x.with}-${i}`} title={x.with}
+               detail={`${x.what} · since ${formatDay(x.since)}${x.until ? ` · until ${formatDay(x.until)}` : ''}`}
+               last={i === s.shared_with.length - 1} />
+        ))}
+      </Section>
+      <Body muted style={{ fontSize: 12, marginTop: -6 }}>
+        Change any of these from Settings (apps, clinics, linked relatives) or the item itself.
+      </Body>
+
+      <Section title="Your nominee">
+        {nominee ? (
+          <View style={{ padding: 16, gap: 10 }}>
+            <Body muted>Someone who can use these rights for you if you die or can&apos;t.</Body>
+            <Field label="Name" value={nominee.name} onChangeText={(v) => setNominee({ ...nominee, name: v })} />
+            <Field label="Relationship" value={nominee.relationship} placeholder="brother"
+                   onChangeText={(v) => setNominee({ ...nominee, relationship: v })} />
+            <Field label="Phone" value={nominee.phone} keyboardType="phone-pad" onChangeText={(v) => setNominee({ ...nominee, phone: v })} />
+            <Button title="Save nominee" variant="primary" disabled={!nominee.name.trim() || !nominee.relationship.trim()}
+                    onPress={() => run(async () => {
+                      await api.setNominee({ name: nominee.name.trim(), relationship: nominee.relationship.trim(),
+                                             phone: nominee.phone.trim() || null, email: null });
+                      setNominee(null); reload();
+                    })} />
+          </View>
+        ) : s.nominee ? (
+          <>
+            <Row title={`${s.nominee.name} (${s.nominee.relationship})`} detail={s.nominee.phone ?? undefined}
+                 onPress={() => setNominee({ name: s.nominee!.name, relationship: s.nominee!.relationship, phone: s.nominee!.phone ?? '' })} />
+            <Row title="Remove nominee" onPress={() => run(async () => { await api.removeNominee(); reload(); })} last />
+          </>
+        ) : (
+          <Row title="Add a nominee" detail="Someone who can use these rights for you if you die or can't"
+               onPress={() => setNominee({ name: '', relationship: '', phone: '' })} last />
+        )}
+      </Section>
+
+      <Section title="Concerns">
+        {s.grievances.map((g) => (
+          <Row key={g.id} title={`${g.category}: ${g.status === 'open' ? `answer due by ${formatDay(g.due_at)}` : 'answered'}`}
+               detail={g.response ?? g.message} />
+        ))}
+        {concern ? (
+          <View style={{ padding: 16, gap: 10 }}>
+            <Chips label="About" options={CATEGORIES} value={concern.category}
+                   onChange={(v) => setConcern({ ...concern, category: v })} />
+            <Field label="What's the concern?" value={concern.message} multiline
+                   onChangeText={(v) => setConcern({ ...concern, message: v })} />
+            <Button title="Send" variant="primary" disabled={concern.message.trim().length < 5}
+                    onPress={() => run(async () => {
+                      const r = await api.raiseGrievance(concern.category, concern.message.trim());
+                      setConcern(null); setNote(r.message); reload();
+                    })} />
+          </View>
+        ) : (
+          <Row title="Raise a concern" detail={`Answered within ${s.contact.response_days} days${s.contact.email ? ` · ${s.contact.email}` : ''}`}
+               onPress={() => setConcern({ category: 'access', message: '' })} last />
+        )}
+      </Section>
+      <Body muted style={{ fontSize: 12, marginTop: -6 }}>
+        If you&apos;re not satisfied with our answer, you can complain to the Data Protection Board of India.
+      </Body>
+
+      <Card>
+        <H2>Download everything</H2>
+        <Body muted>Your record, documents list, consents, sharing, bookings and the log of who accessed it, as one file.</Body>
+        <View style={styles.row}>
+          <Pressable accessibilityRole="button" onPress={() => run(async () => {
+            const json = await api.privacyExport();
+            if (Platform.OS === 'web') {
+              const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+              const a = document.createElement('a');
+              a.href = url; a.download = 'my-family-health-graph-data.json'; a.click(); URL.revokeObjectURL(url);
+            } else {
+              await Share.share({ title: 'My Family Health Graph data', message: json });
+            }
+          })}>
+            <Text style={{ color: c.accent, fontSize: 16, fontWeight: '600' }}>Download my data</Text>
+          </Pressable>
+        </View>
+      </Card>
+    </Screen>
+  );
+}

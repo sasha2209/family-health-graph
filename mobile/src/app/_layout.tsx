@@ -32,6 +32,7 @@ function RootStack() {
         <Stack.Screen name="connections" options={{ title: 'Connected records' }} />
         <Stack.Screen name="book" options={{ title: 'Book a test' }} />
         <Stack.Screen name="care" options={{ title: 'Caregiver mode' }} />
+        <Stack.Screen name="privacy" options={{ title: 'Your privacy' }} />
         <Stack.Screen name="authorize" options={{ title: 'Share your family history', headerBackVisible: false }} />
       </Stack.Protected>
       <Stack.Protected guard={!token} redirectTo="/">

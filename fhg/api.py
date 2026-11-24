@@ -20,8 +20,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
-from . import auth, bookings, care, clinic, emergency, i18n, inbound, partners, push, risk_models, trends
-from .connectors import smart
+from . import auth, bookings, care, clinic, emergency, i18n, privacy, inbound, partners, push, risk_models, trends
+from .connectors import abdm, smart
 from . import partner_oauth as poauth
 from .clinician_report import render_html as clinician_report_html
 from .family_links import (
@@ -82,6 +82,15 @@ class Settings:
     whatsapp_phone_number_id: Optional[str] = None
     # Patient portals people can connect (docs/CONNECTIONS.md): JSON list of {id, name, iss, client_id}.
     smart_providers: Optional[str] = None
+    # Direct ABHA link through NHA's ABDM Wrapper (docs/TRUST_AND_COMPLIANCE.md): its base URL and our HIU id.
+    abdm_wrapper_url: Optional[str] = None
+    abdm_hiu_id: Optional[str] = None
+    abdm_requester_name: str = "Family Health Graph"
+    # DPDP Act: who answers privacy questions, and in how many days (set from the notified DPDP Rules).
+    data_fiduciary: str = "Family Health Graph"
+    grievance_officer_name: Optional[str] = None
+    grievance_officer_email: Optional[str] = None
+    grievance_days: int = 30
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -106,6 +115,13 @@ class Settings:
             whatsapp_access_token=os.environ.get("FHG_WHATSAPP_ACCESS_TOKEN") or None,
             whatsapp_phone_number_id=os.environ.get("FHG_WHATSAPP_PHONE_NUMBER_ID") or None,
             smart_providers=os.environ.get("FHG_SMART_PROVIDERS") or None,
+            abdm_wrapper_url=os.environ.get("FHG_ABDM_WRAPPER_URL") or None,
+            abdm_hiu_id=os.environ.get("FHG_ABDM_HIU_ID") or None,
+            abdm_requester_name=os.environ.get("FHG_ABDM_REQUESTER_NAME") or cls.abdm_requester_name,
+            data_fiduciary=os.environ.get("FHG_DATA_FIDUCIARY") or cls.data_fiduciary,
+            grievance_officer_name=os.environ.get("FHG_GRIEVANCE_OFFICER_NAME") or None,
+            grievance_officer_email=os.environ.get("FHG_GRIEVANCE_OFFICER_EMAIL") or None,
+            grievance_days=int(os.environ.get("FHG_GRIEVANCE_DAYS") or cls.grievance_days),
             ios_app_ids=_csv("FHG_IOS_APP_IDS"),
             android_package=os.environ.get("FHG_ANDROID_PACKAGE") or None,
             android_cert_sha256=_csv("FHG_ANDROID_CERT_SHA256"),
@@ -352,6 +368,39 @@ class EmergencyLinkIn(BaseModel):
     hours: int = Field(24, ge=1, le=72)
 
 
+class AbhaIn(BaseModel):
+    abha_address: str = Field(description="e.g. priya.shah@abdm (sandbox: @sbx)")
+
+
+class NomineeIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    relationship: str = Field(min_length=1, max_length=40)
+    phone: Optional[str] = Field(None, max_length=20)
+    email: Optional[str] = Field(None, max_length=120)
+
+
+class GrievanceIn(BaseModel):
+    category: str = Field(pattern="^(access|correction|erasure|consent|sharing|security|other)$")
+    message: str = Field(min_length=5, max_length=2000)
+
+
+class GrievanceAnswerIn(BaseModel):
+    response: str = Field(min_length=1, max_length=2000)
+    status: str = Field("resolved", pattern="^(open|resolved)$")
+
+
+class BreachIn(BaseModel):
+    nature: str = Field(min_length=5, max_length=1000, description="What happened, in plain words")
+    data_affected: list[str] = Field(min_length=1, max_length=20)
+    occurred_at: Optional[datetime] = None
+    detected_at: datetime
+    likely_consequences: str = Field(min_length=5, max_length=1000)
+    measures_taken: str = Field(min_length=5, max_length=1000)
+    what_you_can_do: str = Field(min_length=5, max_length=1000)
+    affected_user_ids: Optional[list[str]] = None
+    all_users: bool = False
+
+
 class ReferralIn(BaseModel):
     rule_id: str = Field(..., max_length=60)
     status: str = Field(..., pattern="^(referred|scheduled|completed|declined)$")
@@ -408,7 +457,8 @@ def create_app(settings: Optional[Settings] = None,
                webhooks_in_background: bool = True,
                document_ai_client: Optional[object] = None,
                whatsapp_client: Optional[inbound.WhatsAppClient] = None,
-               smart_http: Optional[smart.Http] = None) -> FastAPI:
+               smart_http: Optional[smart.Http] = None,
+               abdm_http: Optional[abdm.JsonHttp] = None) -> FastAPI:
     settings = settings or Settings.from_env()
     email_sender = email_sender or auth.email_sender_from_env()
     if settings.auth_secret == Settings.auth_secret:
@@ -424,6 +474,24 @@ def create_app(settings: Optional[Settings] = None,
     notifier = push.Notifier(store, push_sender or push.push_sender_from_env(), background=push_in_background)
     partner_hooks = partners.PartnerNotifier(store, webhook_sender or partners.HttpWebhookSender(),
                                              background=webhooks_in_background)
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), payment=()")
+        if request.url.scheme == "https" or (settings.public_url or "").startswith("https://"):
+            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        return response
+
+    def require_adult(user_id: str, what: str) -> None:
+        """DPDP Act s.9: a child's data needs verifiable parental consent before it's shared or used beyond the
+        app's core purpose. Until that flow exists, these are switched off for account holders under 18."""
+        if privacy.is_minor(store.get_profile(user_id)):
+            raise HTTPException(403, f"{what} isn't available for people under 18 yet: it needs a parent's "
+                                     "verified consent first.")
+
     if settings.cors_origins:
         app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins),
                            allow_methods=["*"], allow_headers=["Authorization", "Content-Type"])
@@ -631,6 +699,12 @@ def create_app(settings: Optional[Settings] = None,
 
     @app.delete("/v1/me", status_code=204)
     def delete_me(user_id: str = Depends(current_user)) -> None:
+        """Erase the account and all health data (DPDP Act s.12). Partners holding data under a grant are told
+        to erase it too (a health-data-free webhook with their pseudonymous patient id)."""
+        for g in store.grants_for_user(user_id):
+            partner_hooks.notify_event(g["partner_id"], "patient.erasure_requested", {"patient": partner_patient_id(g)})
+        for b in store.bookings_for_user(user_id):
+            partner_hooks.notify_event(b["partner_id"], "booking.erasure_requested", {"booking_id": b["id"]})
         store.delete_user(user_id)
 
     # --- profile -----------------------------------------------------------------
@@ -1184,7 +1258,9 @@ def create_app(settings: Optional[Settings] = None,
     def list_connections(user_id: str = Depends(current_user)) -> dict:
         """Connected sources, and the patient portals this server can connect to."""
         return {"connections": store.connections(user_id),
-                "available": [{"id": p.id, "name": p.name, "kind": "smart"} for p in smart_providers.values()]}
+                "available": [{"id": p.id, "name": p.name, "kind": "smart"} for p in smart_providers.values()]
+                + ([{"id": "abdm", "name": "ABHA (hospitals and labs across India)", "kind": "abdm"}]
+                   if settings.abdm_wrapper_url and settings.abdm_hiu_id else [])}
 
     @app.post("/v1/connect/smart")
     def start_smart(body: SmartStartIn, request: Request, user_id: str = Depends(current_user)) -> dict:
@@ -1265,6 +1341,8 @@ def create_app(settings: Optional[Settings] = None,
         conn = store.connection(user_id, conn_id)
         if conn is None:
             raise HTTPException(404, "No such connection")
+        if conn["kind"] == "abdm":
+            return abdm_sync(user_id, conn)
         if conn["kind"] != "smart":
             raise HTTPException(409, "This connection syncs automatically")
         return smart_sync(user_id, conn)
@@ -1648,6 +1726,7 @@ def create_app(settings: Optional[Settings] = None,
 
     @app.post("/v1/oauth/approve")
     def oauth_approve(body: OAuthApproveIn, user_id: str = Depends(current_user)) -> dict:
+        require_adult(user_id, "Sharing with apps")
         client = oauth_client(body.client_id, body.redirect_uri)
         known, unknown = poauth.parse_scopes(" ".join(body.scopes))
         if unknown or not known or body.code_challenge_method != "S256":
@@ -1808,6 +1887,7 @@ def create_app(settings: Optional[Settings] = None,
     @app.post("/v1/bookings", status_code=201)
     def create_booking(body: BookingIn, user_id: str = Depends(current_user)) -> dict:
         """Book tests with a partner. Only the tests, slot and these contact details are shared with them."""
+        require_adult(user_id, "Booking with a partner")
         partner = next((p for p in store.partners_with_catalog() if p["id"] == body.partner_id), None)
         if partner is None:
             raise HTTPException(404, "No such lab")
@@ -2029,6 +2109,8 @@ def create_app(settings: Optional[Settings] = None,
     def set_consent(body: ConsentIn, user_id: str = Depends(current_user)) -> dict:
         if body.scope not in valid_scopes:
             raise HTTPException(422, f"Unknown scope. Valid scopes: {sorted(valid_scopes)}")
+        if body.granted:
+            require_adult(user_id, "This option")
         store.set_consent(user_id, body.scope, body.granted)
         store.audit(user_id, "user", "consent." + ("grant" if body.granted else "revoke"),
                     {"scope": body.scope})
@@ -2239,6 +2321,213 @@ def create_app(settings: Optional[Settings] = None,
             records.append(deidentify(store.get_profile(uid), pseudonym(settings.pseudonym_secret, uid)))
             store.audit(uid, "admin", "research.export")
         return {"count": len(records), "records": records}
+
+    # --- direct ABHA link (ABDM, through NHA's ABDM Wrapper) --------------------------------------
+    abdm_client = (abdm.WrapperClient(settings.abdm_wrapper_url, settings.abdm_hiu_id, settings.abdm_requester_name,
+                                      abdm_http or abdm.UrllibJsonHttp())
+                   if settings.abdm_wrapper_url and settings.abdm_hiu_id else None)
+
+    @app.post("/v1/connect/abha", status_code=201)
+    def connect_abha(body: AbhaIn, user_id: str = Depends(current_user)) -> dict:
+        """Ask for consent to pull records from ABDM-linked hospitals and labs. The person approves the request
+        in their ABHA app; then 'Sync now' imports the records."""
+        if abdm_client is None:
+            raise HTTPException(404, "ABHA linking isn't set up on this server")
+        address = body.abha_address.strip().lower()
+        if not abdm.valid_abha_address(address):
+            raise HTTPException(422, "Enter your ABHA address, like name@abdm")
+        try:
+            request_id = abdm_client.consent_init(address)
+        except abdm.AbdmError as exc:
+            raise HTTPException(502, str(exc)) from exc
+        conn_id = store.create_connection(user_id, "abdm", "abdm", f"ABHA · {address}",
+                                          {"abha_address": address, "consent_request_id": request_id, "fetches": {},
+                                           "imported": []}, status="pending")
+        store.audit(user_id, "user", "connection.started", {"provider": "abdm"})
+        return {"id": conn_id, "status": "pending",
+                "message": "Open your ABHA app (or the PHR app you use) and approve the request from "
+                           f"{settings.abdm_requester_name}. Then tap Sync now."}
+
+    def abdm_sync(user_id: str, conn: dict) -> dict:
+        if abdm_client is None:
+            raise HTTPException(409, "ABHA linking isn't set up on this server")
+        secret = conn["secret"]
+        state = abdm_client.consent_status(secret["consent_request_id"])
+        if state.status in ("DENIED", "REVOKED", "EXPIRED"):
+            store.update_connection(conn["id"], status=state.status.lower())
+            raise HTTPException(409, {"DENIED": "The request was declined in the ABHA app.",
+                                      "REVOKED": "Access was withdrawn in the ABHA app.",
+                                      "EXPIRED": "The request expired. Remove this connection and start again."}[state.status])
+        if state.status != "GRANTED":
+            msg = state.message or "Waiting for you to approve the request in your ABHA app."
+            store.update_connection(conn["id"], status="pending", sync_summary={"waiting": msg})
+            return {"status": "pending", "message": msg, "merged": None}
+        totals = {"conditions": 0, "medications": 0, "observations": 0, "relatives_added": 0}
+        pending = 0
+        try:
+            for art in state.artefacts:
+                if art["id"] in secret["imported"]:
+                    continue
+                if art["id"] not in secret["fetches"]:
+                    secret["fetches"][art["id"]] = abdm_client.fetch_records(art["id"])
+                records = abdm_client.records_status(secret["fetches"][art["id"]])
+                if not records.done:
+                    pending += 1
+                    continue
+                for bundle in records.bundles:
+                    try:
+                        fragment = parse_fhir(bundle, source=f"abdm:{art.get('hip_id') or 'hip'}")
+                    except ValueError:
+                        continue
+                    merged = ingest(user_id, "abdm", json.dumps({"connection": conn["id"], "hip": art.get("hip_id")}),
+                                    fragment, preview=False)["merged"]
+                    for k in totals:
+                        totals[k] += merged.get(k, 0)
+                secret["imported"].append(art["id"])
+        except abdm.AbdmError as exc:
+            store.update_connection(conn["id"], secret=secret, status="error")
+            raise HTTPException(502, str(exc)) from exc
+        status = "pending" if pending else "active"
+        store.update_connection(conn["id"], secret=secret, status=status,
+                                sync_summary={"sources": len(state.artefacts), "waiting_for": pending, "merged": totals})
+        return {"status": status, "merged": totals,
+                "message": (f"Still fetching from {pending} source{'s' * (pending != 1)}; sync again in a minute."
+                            if pending else "Records imported.")}
+
+    # --- privacy rights (DPDP Act) -------------------------------------------------------------
+    @app.get("/v1/privacy/notice")
+    def privacy_notice(lang: str = Query("en", pattern="^[a-z]{2}$")) -> dict:
+        """The privacy notice, in English or Hindi. Public: shown before an account exists."""
+        return privacy.notice(lang, settings.data_fiduciary, settings.grievance_officer_name,
+                              settings.grievance_officer_email, settings.grievance_days)
+
+    @app.get("/v1/privacy")
+    def privacy_summary(user_id: str = Depends(current_user)) -> dict:
+        """What we hold about you, who it has been shared with, your consents, nominee and concerns (DPDP s.11)."""
+        profile = store.get_profile(user_id)
+        shared = []
+        for link in store.links_for(user_id):
+            if link["i_share"] != "none":
+                shared.append({"with": f"Your {link['relationship'].replace('_', ' ')} (linked account)",
+                               "what": "Your conditions" + (" and family tree" if link["i_share"] == "conditions_and_tree" else ""),
+                               "since": link["created_at"]})
+        for org in store.orgs_for_patient(user_id):
+            shared.append({"with": f"{org['name']} (clinic)", "what": "Your record and insights", "since": org["connected_at"]})
+        for g in store.grants_for_user(user_id):
+            shared.append({"with": f"{g['partner_name']} (app)", "what": ", ".join(poauth.SCOPES.get(x, x) for x in g["scopes"]),
+                           "since": g["created_at"], "until": g["expires_at"]})
+        for r in store.referrals_for_patient(user_id):
+            if r["partner_name"]:
+                shared.append({"with": f"{r['partner_name']} (referral from {r['org_name']})",
+                               "what": "The referral and your summary", "since": r["updated_at"]})
+        for b in store.bookings_for_user(user_id):
+            shared.append({"with": f"{b['partner_name']} (test booking)", "what": "The tests, slot and contact details you gave",
+                           "since": b["created_at"]})
+        for res in store.risk_results(user_id):
+            shared.append({"with": f"{res['partner_name']} (counseling)", "what": "Your family tree as a CanRisk file",
+                           "since": res["created_at"]})
+        for m in profile.family:
+            for g in store.caregivers(user_id, m.id):
+                shared.append({"with": f"{g['name'] or 'A family member'} (care circle for {m.name or m.label})",
+                               "what": f"{m.name or m.label}'s medicines and emergency details", "since": g["joined_at"]})
+        processors = [{"name": "Document reading with AI (only if you turned it on)", "active": store.has_consent(user_id, CONSENT_AI_DOCS)}]
+        return {"held": privacy.held(profile, len(store.documents(user_id))),
+                "connections": [{"name": c["display_name"], "status": c["status"]} for c in store.connections(user_id)],
+                "shared_with": shared, "processors": processors, "consents": store.consents(user_id),
+                "nominee": store.nominee(user_id), "grievances": store.grievances(user_id=user_id),
+                "minor": privacy.is_minor(profile),
+                "contact": {"name": settings.grievance_officer_name, "email": settings.grievance_officer_email,
+                            "response_days": settings.grievance_days}}
+
+    @app.get("/v1/privacy/export")
+    def privacy_export(user_id: str = Depends(current_user)) -> Response:
+        """Everything about you in one JSON file: record, documents list, consents, sharing, bookings, care,
+        notifications and the access log."""
+        out = {"exported_at": datetime.now(timezone.utc).isoformat(), "profile": _dump(store.get_profile(user_id)),
+               "documents": store.documents(user_id), "consents": store.consents(user_id),
+               "grants": [{k: g[k] for k in ("partner_name", "scopes", "created_at", "expires_at")} for g in store.grants_for_user(user_id)],
+               "connections": [{k: c[k] for k in ("display_name", "kind", "status", "created_at")} for c in store.connections(user_id)],
+               "bookings": store.bookings_for_user(user_id), "risk_assessments": store.risk_results(user_id),
+               "nominee": store.nominee(user_id), "grievances": store.grievances(user_id=user_id),
+               "notifications": store.notifications(user_id), "access_log": store.audit_log(user_id)}
+        store.audit(user_id, "user", "privacy.export")
+        return Response(json.dumps(out, default=str, ensure_ascii=False, indent=1), media_type="application/json",
+                        headers={"Content-Disposition": 'attachment; filename="my-family-health-graph-data.json"',
+                                 "Cache-Control": "no-store"})
+
+    @app.put("/v1/privacy/nominee")
+    def set_nominee(body: NomineeIn, user_id: str = Depends(current_user)) -> dict:
+        """Someone who can exercise your rights if you die or can't (DPDP s.14)."""
+        store.set_nominee(user_id, body.model_dump())
+        store.audit(user_id, "user", "privacy.nominee_set")
+        return store.nominee(user_id)
+
+    @app.delete("/v1/privacy/nominee", status_code=204)
+    def remove_nominee(user_id: str = Depends(current_user)) -> Response:
+        store.set_nominee(user_id, None)
+        store.audit(user_id, "user", "privacy.nominee_removed")
+        return Response(status_code=204)
+
+    @app.post("/v1/privacy/grievances", status_code=201)
+    def raise_grievance(body: GrievanceIn, user_id: str = Depends(current_user)) -> dict:
+        due = datetime.now(timezone.utc) + timedelta(days=settings.grievance_days)
+        gid = store.create_grievance(user_id, body.category, body.message, due.isoformat())
+        store.audit(user_id, "user", "privacy.grievance", {"id": gid, "category": body.category})
+        return {"id": gid, "status": "open", "due_at": due.isoformat(),
+                "message": f"We'll answer within {settings.grievance_days} days."}
+
+    @app.get("/admin/grievances", dependencies=[Depends(require_admin)])
+    def admin_grievances(status: Optional[str] = Query("open")) -> list[dict]:
+        now = datetime.now(timezone.utc).isoformat()
+        return [g | {"overdue": g["status"] == "open" and g["due_at"] < now} for g in store.grievances(status=status)]
+
+    @app.post("/admin/grievances/{gid}/answer", dependencies=[Depends(require_admin)])
+    def admin_answer_grievance(gid: str, body: GrievanceAnswerIn) -> dict:
+        g = store.resolve_grievance(gid, body.response, body.status)
+        if g is None:
+            raise HTTPException(404, "No such grievance")
+        store.audit(g["user_id"], "privacy_officer", "privacy.grievance_answered", {"id": gid, "status": body.status})
+        notifier.notify(g["user_id"], "privacy", f"Answer to your privacy concern: {body.response}")
+        return g
+
+    @app.post("/admin/breaches", status_code=201, dependencies=[Depends(require_admin)])
+    def admin_record_breach(body: BreachIn) -> dict:
+        """Record a personal data breach and tell every affected person (DPDP s.8(6)). Intimating the Data
+        Protection Board is done outside the app; record it with /admin/breaches/{id}/board."""
+        if body.all_users:
+            affected = store.user_ids()
+        elif body.affected_user_ids:
+            known = set(store.user_ids())
+            affected = [u for u in body.affected_user_ids if u in known]
+        else:
+            raise HTTPException(422, "Give affected_user_ids, or all_users: true")
+        contact = settings.grievance_officer_email or "the privacy contact in Settings → Privacy"
+        message = (f"Security notice: {body.nature} Information affected: {', '.join(body.data_affected)}. "
+                   f"What this may mean: {body.likely_consequences} What we've done: {body.measures_taken} "
+                   f"What you can do: {body.what_you_can_do} Questions: {contact}.")
+        bid = store.record_breach(body.model_dump(mode="json", exclude={"affected_user_ids", "all_users"}) | {"notice": message},
+                                  body.occurred_at.isoformat() if body.occurred_at else None, body.detected_at.isoformat(),
+                                  len(affected))
+        for uid in affected:
+            notifier.notify(uid, "security", message)
+            store.audit(uid, "privacy_officer", "privacy.breach_notified", {"breach": bid})
+        return {"id": bid, "notified": len(affected)}
+
+    @app.get("/admin/breaches", dependencies=[Depends(require_admin)])
+    def admin_breaches() -> list[dict]:
+        return store.breaches()
+
+    @app.post("/admin/breaches/{bid}/board/{stage}", dependencies=[Depends(require_admin)])
+    def admin_breach_board(bid: str, stage: str) -> dict:
+        if stage not in ("intimation", "report") or not store.mark_breach_board(bid, stage):
+            raise HTTPException(404, "No such breach or stage (intimation | report)")
+        return next(b for b in store.breaches() if b["id"] == bid)
+
+    @app.post("/admin/tasks/housekeeping", dependencies=[Depends(require_admin)])
+    def run_housekeeping() -> dict:
+        """Delete expired codes, tokens, invites and links. Run daily."""
+        return {"deleted": store.housekeeping()}
+
 
     # --- caregiver mode ------------------------------------------------------------------------
     # A "care id" is "<owner user id>.<relative id>": the relative lives on the owner's record; caregivers in the
