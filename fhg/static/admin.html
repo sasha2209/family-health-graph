@@ -71,6 +71,7 @@
     <button data-tab="overview" aria-current="page">Overview</button>
     <button data-tab="report">Pilot report</button>
     <button data-tab="partners">Partners</button>
+    <button data-tab="practice">Practice clinic</button>
     <button data-tab="grievances">Concerns</button>
     <button data-tab="breaches">Breaches</button>
     <button data-tab="jobs">Jobs &amp; backups</button>
@@ -128,6 +129,25 @@
       <p class="muted small">What families see under “Get tested”. Leave a price empty if it isn't offered.</p>
       <div class="table-wrap"><table id="catalog"><thead><tr><th>Test</th><th>Price (₹)</th><th>Home collection</th><th>Results in (days)</th></tr></thead><tbody></tbody></table></div>
       <div class="row" style="margin-top:10px"><button class="primary" id="catalog-save">Save price list</button><button id="catalog-close">Close</button></div>
+    </div>
+  </section>
+
+  <section data-panel="practice" hidden>
+    <div class="card">
+      <h2>Practice clinic for staff training</h2>
+      <p class="muted small">A clinic filled with 14 made-up families that between them cover every care program and
+        referral status, so staff can rehearse the worklist, a patient summary and referrals before real patients
+        arrive. Staff join it in the clinic portal with the staff code. Its patients are not counted in the pilot
+        report, real patients can't join it, and its referrals are never sent to partners. Delete it after training.</p>
+      <form id="practice-form" class="grid2">
+        <label class="f">Name<input name="name" value="Practice clinic" required minlength="2"></label>
+        <label class="f">Patients' language<select name="lang"><option value="hi">Hindi</option><option value="mr">Marathi</option></select></label>
+        <div class="row" style="align-items:end"><button class="primary">Create practice clinic</button></div>
+      </form>
+    </div>
+    <div class="card">
+      <h2>Practice clinics</h2>
+      <div class="table-wrap"><table id="practice"><thead><tr><th>Name</th><th>Staff code</th><th class="num">Patients</th><th class="num">Staff joined</th><th class="hide-s">Created</th><th></th></tr></thead><tbody></tbody></table></div>
     </div>
   </section>
 
@@ -204,7 +224,7 @@
     document.querySelectorAll('nav [data-tab]').forEach((b) => {
       if (b.dataset.tab === tab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
     });
-    ({ overview: loadOverview, report: loadReport, partners: loadPartners, grievances: loadGrievances, breaches: loadBreaches, jobs: loadJobs })[tab]();
+    ({ overview: loadOverview, report: loadReport, partners: loadPartners, practice: loadPractice, grievances: loadGrievances, breaches: loadBreaches, jobs: loadJobs })[tab]();
   }
   $('#tabs').addEventListener('click', (e) => { const t = e.target.closest('[data-tab]'); if (t) show(t.dataset.tab); });
   $('#signout').addEventListener('click', () => { try { sessionStorage.removeItem('fhg_admin'); } catch { /* ignore */ } location.reload(); });
@@ -235,6 +255,29 @@
       `<tr><td>${esc(b.partner)}</td><td>${esc(b.status.replace(/_/g, ' '))}</td><td class="num">${esc(b.n)}</td><td class="num">${inr(b.value_inr)}</td></tr>`).join('')
       : '<tr><td colspan="4" class="muted">No bookings yet.</td></tr>';
   });
+
+  // --- practice clinic ---
+  const loadPractice = guard(async () => {
+    const rows = await api('/admin/practice-clinics');
+    $('#practice tbody').innerHTML = rows.length ? rows.map((o) => `<tr><td>${esc(o.name)}</td>
+      <td><code>${esc(o.staff_code)}</code></td><td class="num">${esc(o.patients)}</td><td class="num">${esc(o.staff)}</td>
+      <td class="hide-s">${when(o.created_at)}</td><td><button data-delete-practice="${esc(o.id)}">Delete</button></td></tr>`).join('')
+      : '<tr><td colspan="6" class="muted">None. Create one before staff training.</td></tr>';
+  });
+  $('#practice-form').addEventListener('submit', guard(async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const o = await api('/admin/practice-clinics', { method: 'POST', body: JSON.stringify({ name: f.get('name'), lang: f.get('lang') }) });
+    notice(`Created “${o.name}” with ${o.patients} practice families. Staff join in the clinic portal with code ${o.staff_code}.`);
+    loadPractice();
+  }));
+  $('#practice').addEventListener('click', guard(async (e) => {
+    const b = e.target.closest('[data-delete-practice]');
+    if (!b || !confirm('Delete this practice clinic and its made-up patients? Staff accounts are kept.')) return;
+    const r = await api(`/admin/practice-clinics/${encodeURIComponent(b.dataset.deletePractice)}`, { method: 'DELETE' });
+    notice(`Deleted, with ${r.patients} practice patients.`);
+    loadPractice();
+  }));
 
   // --- pilot report ---
   const pct = (v) => (v == null ? '—' : `${v}%`);

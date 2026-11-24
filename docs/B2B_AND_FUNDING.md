@@ -19,8 +19,8 @@ A buyer needs three things from us:
 
 ## Fastest routes to funding
 
-1. **A pilot with one clinic.** The portal plus the "Load demo patients" button is a complete demo
-   today. Offer a free 60-day pilot to a family practice, OB-GYN or cancer-screening clinic, and report
+1. **A pilot with one clinic.** The portal plus a practice clinic (console → *Practice clinic*: 14 made-up
+   families covering every care program) is a complete demo today. Offer a free 60-day pilot to a family practice, OB-GYN or cancer-screening clinic, and report
    connected patients, patients identified per program, and referrals completed. Those three numbers are
    what seed investors and health-system buyers ask for.
 2. **Non-dilutive grants.** The US NIH SBIR/STTR programs (notably NCI and NHGRI) have funded

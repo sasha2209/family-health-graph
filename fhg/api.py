@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
-from . import auth, backup as backups, bookings, care, clinic, emergency, i18n, monitoring, pilot, privacy, inbound, partners, push, risk_models, trends
+from . import auth, backup as backups, bookings, care, clinic, emergency, i18n, monitoring, pilot, practice, privacy, inbound, partners, push, risk_models, trends
 from .connectors import abdm, smart
 from . import partner_oauth as poauth
 from .clinician_report import render_html as clinician_report_html
@@ -449,6 +449,11 @@ class ReferralIn(BaseModel):
     note: Optional[str] = Field(None, max_length=500)
     # Route to a referral partner (null = handled in-house). Omit to keep the current routing.
     partner_id: Optional[str] = Field(None, max_length=40)
+
+
+class PracticeClinicIn(BaseModel):
+    name: str = Field("Practice clinic", min_length=2, max_length=120)
+    lang: str = Field("hi", pattern="^(hi|mr)$")
 
 
 class PartnerIn(BaseModel):
@@ -1548,7 +1553,7 @@ def create_app(settings: Optional[Settings] = None,
         return org.get("lang") or "hi"
 
     def org_public(org: dict, role: Optional[str] = None, request: Optional[Request] = None) -> dict:
-        out = {"id": org["id"], "name": org["name"], "lang": org_lang(org)}
+        out = {"id": org["id"], "name": org["name"], "lang": org_lang(org), "practice": bool(org.get("practice"))}
         if role:
             out |= {"role": role, "patient_code": org["patient_code"], "intake_url": intake_url(org, request)}
         if role == "admin":
@@ -1630,6 +1635,8 @@ def create_app(settings: Optional[Settings] = None,
                        if r["org_id"] == org_id and r["rule_id"] == body.rule_id), None)
         route: dict = {}
         if "partner_id" in body.model_fields_set:
+            if body.partner_id is not None and org.get("practice"):
+                raise HTTPException(422, "This is a practice clinic: its referrals aren't sent to partners")
             if body.partner_id is not None:
                 partner = store.partner(body.partner_id)
                 if partner is None or not partner["active"]:
@@ -1774,6 +1781,40 @@ def create_app(settings: Optional[Settings] = None,
             admin_failures[ip] = recent + [now]
             raise HTTPException(403, "Admin key required")
         admin_failures.pop(ip, None)
+
+    @app.post("/admin/practice-clinics", status_code=201, dependencies=[Depends(require_admin)])
+    def admin_create_practice_clinic(body: PracticeClinicIn) -> dict:
+        """A clinic of made-up families for staff training (fhg/practice.py). Staff join with the staff code."""
+        coordinator, _ = store.create_user("practice clinic")
+        org = store.create_org(body.name.strip(), coordinator)
+        store.set_org_lang(org["id"], body.lang)
+        patients = [coordinator]
+        for fam in practice.FAMILIES:
+            uid, _ = store.create_user("practice patient")
+            store.save_profile(practice.profile(fam, uid))
+            store.connect_patient(org["id"], uid, fam.name, "practice")
+            patients.append(uid)
+        store.mark_practice(org["id"], patients)
+        for fam, uid in zip(practice.FAMILIES, patients[1:]):
+            for rule_id, status in fam.referrals.items():
+                store.set_referral_status(org["id"], uid, rule_id, status, coordinator, None)
+        store.audit("admin", "admin", "practice_clinic.created", {"org_id": org["id"]})
+        return {"id": org["id"], "name": org["name"], "staff_code": org["staff_code"], "lang": body.lang,
+                "patients": len(practice.FAMILIES)}
+
+    @app.get("/admin/practice-clinics", dependencies=[Depends(require_admin)])
+    def admin_practice_clinics() -> list[dict]:
+        return [{"id": o["id"], "name": o["name"], "staff_code": o["staff_code"], "lang": org_lang(o),
+                 "patients": o["patients"], "staff": o["staff"] - 1, "created_at": o["created_at"]}
+                for o in store.practice_orgs()]
+
+    @app.delete("/admin/practice-clinics/{org_id}", dependencies=[Depends(require_admin)])
+    def admin_delete_practice_clinic(org_id: str) -> dict:
+        deleted = store.delete_practice_org(org_id)
+        if deleted < 0:
+            raise HTTPException(404, "No such practice clinic")
+        store.audit("admin", "admin", "practice_clinic.deleted", {"org_id": org_id, "patients": deleted})
+        return {"deleted": True, "patients": deleted}
 
     @app.post("/admin/partners", status_code=201, dependencies=[Depends(require_admin)])
     def admin_create_partner(body: PartnerIn) -> dict:
@@ -2194,16 +2235,11 @@ def create_app(settings: Optional[Settings] = None,
     # Patient side: connect to / disconnect from a clinic.
     @app.get("/v1/clinics/lookup/{code}")
     def lookup_clinic(code: str, user_id: str = Depends(current_user)) -> dict:
-        org = store.org_by_code("patient", code)
-        if org is None:
-            raise HTTPException(404, "No clinic has that code")
-        return org_public(org)
+        return org_public(clinic_by_code_or_404(code))
 
     @app.post("/v1/clinics", status_code=201)
     def connect_clinic(body: ClinicConnectIn, user_id: str = Depends(current_user)) -> dict:
-        org = store.org_by_code("patient", body.code)
-        if org is None:
-            raise HTTPException(404, "No clinic has that code")
+        org = clinic_by_code_or_404(body.code)
         store.connect_patient(org["id"], user_id, body.display_name.strip(), body.source)
         store.audit(user_id, "user", "clinic.connected",
                     {"org_id": org["id"], "org": org["name"], "via": body.source})
@@ -2222,7 +2258,7 @@ def create_app(settings: Optional[Settings] = None,
     # --- pre-visit intake link (public: the clinic code is meant to be printed) ---------------
     def clinic_by_code_or_404(code: str) -> dict:
         org = store.org_by_code("patient", code)
-        if org is None:
+        if org is None or org.get("practice"):           # a practice clinic's patients are made up; no real ones join
             raise HTTPException(404, "No clinic has that code")
         return org
 

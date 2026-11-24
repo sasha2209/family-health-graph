@@ -18,7 +18,7 @@ useful family record, that it surfaces things worth acting on, and that people a
 | When | What |
 |---|---|
 | **Weeks −4 to −2** | Sign the clinic (data-sharing terms below) and the lab partner. Decide on ethics review. Set up production with the [go-live checklist](RUNNING_IN_PRODUCTION.md#before-the-first-family-signs-up). Ship the TestFlight / Play internal builds ([RELEASE.md](RELEASE.md)). Native-speaker review of the Hindi and Marathi. For a Pune clinic, set its language to Marathi in the portal. |
-| **Week −1** | Create the clinic in the app; staff join with the staff code. Add the lab partner and its price list in the console. 30-minute staff training (below). Print the poster and staff guide: clinic portal → *Print poster* / *Staff guide*. Do a dry run: three staff members complete the intake as patients. |
+| **Week −1** | Create the clinic in the app; staff join with the staff code. Add the lab partner and its price list in the console. 30-minute staff training (below), on a practice clinic. Print the poster and staff guide: clinic portal → *Print poster* / *Staff guide*. Do a dry run: three staff members complete the intake as patients. |
 | **Weeks 1–8** | Reception invites patients at booking and check-in. The clinic lead reviews the worklist weekly. Weekly 20-minute review (below). Fix anything that blocks families within days. |
 | **Week 8** | Follow-up survey questions appear automatically for the first families. |
 | **Weeks 8–12** | Keep going; push on follow-through (tests booked → completed, referrals → seen). |
@@ -29,7 +29,10 @@ useful family record, that it surfaces things worth acting on, and that people a
 1. **What it is and why** (5 min): family history changes when screening should start; most families never write it down.
 2. **Reception script** (10 min): role-play with the staff guide, in English and the clinic's language (Hindi or Marathi). Practice the three common
    questions: is it free, who sees it, is it a diagnosis.
-3. **The portal** (10 min): the worklist, a patient summary, setting a referral status, the funnel.
+3. **The portal** (10 min): the worklist, a patient summary, setting a referral status, the funnel. Practise on a
+   **practice clinic** (console → *Practice clinic* → Create): 14 made-up families covering every care program and
+   referral status. Staff join it with its staff code, and it's kept out of the pilot report; real patients can't join
+   it, and its referrals never reach partners. Delete it after training.
 4. **Do and don't** (5 min): the patient ticks consent themselves; action items are prompts, not results.
 
 ## Weekly review (20 minutes, coordinator + clinic lead)
