@@ -109,7 +109,7 @@ export function createApi(token: string | null) {
       authed<Profile>('/v1/profile/lifestyle', { method: 'PUT', body }),
     setDemographics: (body: { sex?: Sex; birth_date?: string }) =>
       authed<Profile>('/v1/profile/demographics', { method: 'PUT', body }),
-    insights: () => authed<InsightReport>('/v1/insights'),
+    insights: (lang?: string) => authed<InsightReport>(`/v1/insights${lang ? `?lang=${encodeURIComponent(lang)}` : ''}`),
     clinicianReport: (includeShared = true) =>
       requestText(`/v1/report/clinician?include_shared=${includeShared}`, token),
     summary: () => authed<{ text: string; generated_by: string; disclaimer: string }>('/v1/insights/summary'),
@@ -150,7 +150,7 @@ export function createApi(token: string | null) {
       authed<{ redirect_to: string }>('/v1/oauth/deny', { method: 'POST', body }),
     grants: () => authed<Grant[]>('/v1/grants'),
     revokeGrant: (id: string) => authed<void>(`/v1/grants/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-    risk: () => authed<RiskReport>('/v1/risk'),
+    risk: (lang?: string) => authed<RiskReport>(`/v1/risk${lang ? `?lang=${encodeURIComponent(lang)}` : ''}`),
     setLanguage: (lang: string) => authed<{ lang: string }>('/v1/profile/language', { method: 'PUT', body: { lang } }),
     care: () => authed<CareSummary[]>('/v1/care'),
     surveys: () => authed<{ id: string; text: string; options: string[] }[]>('/v1/surveys'),

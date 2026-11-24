@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from .models import HealthProfile
+from .insights.lang import mark, tr
 from .pedigree import Pedigree, Person, build
 
 # --- CanRisk pedigree file -----------------------------------------------------------------------------
@@ -86,8 +87,8 @@ class CriteriaResult:
 
 def _describe(p: Person, category: str, age: Optional[int]) -> str:
     from .terminology import CONCEPTS_BY_CATEGORY
-    name = CONCEPTS_BY_CATEGORY[category].display
-    return f"{p.label}: {name} " + (f"at {age}" if age is not None else "(age unknown)")
+    name = tr(CONCEPTS_BY_CATEGORY[category].display)
+    return f"{tr(p.label)}: {name} " + (tr("at {age}", age=age) if age is not None else tr("(age unknown)"))
 
 
 def amsterdam_ii(ped: Pedigree) -> CriteriaResult:
@@ -107,10 +108,10 @@ def amsterdam_ii(ped: Pedigree) -> CriteriaResult:
              if c.category in AMSTERDAM_CANCERS and c.age is not None and c.age < 50]
     result.evidence = [_describe(p, c.category, c.age) for p in affected.values() for c in p.conditions
                        if c.category in AMSTERDAM_CANCERS]
-    result.criteria = (["Three or more relatives with a Lynch-associated cancer"]
-                       + (["One is a first-degree relative of the other two"] if hub else [])
-                       + (["Two or more successive generations affected"] if successive else [])
-                       + (["At least one diagnosed before 50"] if early else []))
+    result.criteria = ([mark("Three or more relatives with a Lynch-associated cancer")]
+                       + ([mark("One is a first-degree relative of the other two")] if hub else [])
+                       + ([mark("Two or more successive generations affected")] if successive else [])
+                       + ([mark("At least one diagnosed before 50")] if early else []))
     result.met = bool(hub and successive and early)
     return result
 
@@ -125,9 +126,9 @@ def revised_bethesda(ped: Pedigree) -> list[CriteriaResult]:
             continue
         met, evidence = [], [_describe(p, c.category, c.age) for c in crc]
         if any(c.age is not None and c.age < 50 for c in crc):
-            met.append("Colorectal cancer diagnosed before 50")
+            met.append(mark("Colorectal cancer diagnosed before 50"))
         if len([c for c in p.conditions if c.category in BETHESDA_CANCERS]) >= 2:
-            met.append("More than one Lynch-associated cancer in the same person")
+            met.append(mark("More than one Lynch-associated cancer in the same person"))
         fdr, sdr = [], []
         for q in ped.real():
             if q.id == p.id:
@@ -143,9 +144,9 @@ def revised_bethesda(ped: Pedigree) -> list[CriteriaResult]:
         young = any(c.age is not None and c.age < 50 for c in crc) or any(
             c.age is not None and c.age < 50 for _, ts in fdr for c in ts)
         if fdr and young:
-            met.append("A first-degree relative with a Lynch-associated cancer, one of them diagnosed before 50")
+            met.append(mark("A first-degree relative with a Lynch-associated cancer, one of them diagnosed before 50"))
         if len(sdr) >= 2:
-            met.append("Two or more first- or second-degree relatives with Lynch-associated cancers, any age")
+            met.append(mark("Two or more first- or second-degree relatives with Lynch-associated cancers, any age"))
         if met:
             evidence += [_describe(q, c.category, c.age) for q, ts in sdr for c in ts]
             out.append(CriteriaResult(f"Revised Bethesda guidelines ({p.label.lower() if not p.proband else 'you'})",

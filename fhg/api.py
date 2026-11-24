@@ -35,6 +35,8 @@ from .family_links import (
 from . import documents as docs
 from .ingest import CsvImportError, parse_family_csv, parse_family_history_text, parse_fhir, to_fhir_bundle
 from .insights import generate_insights, summarize
+from .insights.lang import language as insight_language
+from . import notices as N
 from .merge import find_match, merge_into
 from .models import CareInfo, Condition, FamilyMember, HealthProfile, Medication, Observation, Relationship, Sex
 from .security import constant_time_equals, hash_token, load_cipher, pseudonym
@@ -1122,8 +1124,8 @@ def create_app(settings: Optional[Settings] = None,
 
     def forwarded(user_id: str, n: int, channel: str) -> None:
         if n:
-            notifier.notify(user_id, "documents_received",
-                            f"{n} document{'s' if n > 1 else ''} arrived by {channel} and {'are' if n > 1 else 'is'} waiting for your review.")
+            notifier.notify(user_id, "documents_received", N.say(store.user_lang(user_id), N.DOCS_MANY if n > 1 else N.DOCS_ONE,
+                                                                 translate=("channel",), n=n, channel=channel))
 
     @app.post("/inbound/email", include_in_schema=False)
     async def inbound_email(request: Request, secret: str = Query("")) -> dict:
@@ -1205,7 +1207,8 @@ def create_app(settings: Optional[Settings] = None,
         return "saved"
 
     def wa_summary(user_id: str) -> str:
-        report = generate_insights(effective_profile(store, user_id))
+        with insight_language(store.inbound(user_id).get("lang") or store.user_lang(user_id)):
+            report = generate_insights(effective_profile(store, user_id))
         if not report.insights:
             return "summary_none"
         return "\n".join(f"• {i.title}" for i in report.insights[:5])
@@ -1443,9 +1446,14 @@ def create_app(settings: Optional[Settings] = None,
         return store.list_ingests(user_id)
 
     # --- insights ------------------------------------------------------------------
+    def person_lang(user_id: str, override: Optional[str]) -> str:
+        return override if override in ("en", "hi") else store.user_lang(user_id)
+
     @app.get("/v1/insights")
-    def insights(user_id: str = Depends(current_user)) -> dict:
-        report = generate_insights(effective_profile(store, user_id))
+    def insights(lang: Optional[str] = Query(None, pattern="^[a-z]{2}$", description="Language; default: the person's"),
+                 user_id: str = Depends(current_user)) -> dict:
+        with insight_language(person_lang(user_id, lang)):
+            report = generate_insights(effective_profile(store, user_id))
         store.audit(user_id, "system", "insights.generated", {"count": len(report.insights)})
         return _dump(report)
 
@@ -1458,12 +1466,13 @@ def create_app(settings: Optional[Settings] = None,
         return result | {"disclaimer": report.disclaimer}
 
     @app.get("/v1/risk")
-    def risk(user_id: str = Depends(current_user)) -> dict:
+    def risk(lang: Optional[str] = Query(None, pattern="^[a-z]{2}$"), user_id: str = Depends(current_user)) -> dict:
         """Tree-based hereditary-risk models: Lynch syndrome criteria, the CanRisk export, and any risk figures
         a counselor has shared."""
         profile = effective_profile(store, user_id)
         try:
-            out = risk_models.assess(profile)
+            with insight_language(person_lang(user_id, lang)):
+                out = risk_models.assess(profile)
         except ValueError as exc:
             out = {"needs": str(exc)}
         return out | {"assessments": store.risk_results(user_id)}
@@ -1594,12 +1603,12 @@ def create_app(settings: Optional[Settings] = None,
         store.audit(patient["user_id"], f"org:{org_id}", "clinic.referral",
                     {"org": org["name"], "program": clinic.PROGRAMS[body.rule_id], "status": body.status})
         if body.status in ("referred", "scheduled") and body.status != before:
-            verb = "referred you for" if body.status == "referred" else "scheduled your"
             routed = store.partner(referral["partner_id"]) if referral.get("partner_id") else None
-            notifier.notify(patient["user_id"], "referral",
-                            f"{org['name']} {verb}: {clinic.PROGRAMS[body.rule_id]}"
-                            + (f", with {routed['name']}" if routed else "")
-                            + ". Contact your clinic if you have questions.")
+            template = ({"referred": N.REFERRED_WITH, "scheduled": N.SCHEDULED_WITH} if routed else
+                        {"referred": N.REFERRED, "scheduled": N.SCHEDULED})[body.status]
+            notifier.notify(patient["user_id"], "referral", N.say(
+                store.user_lang(patient["user_id"]), template, translate=("program",), org=org["name"],
+                program=clinic.PROGRAMS[body.rule_id], partner=routed["name"] if routed else ""))
         referral.pop("user_id", None)
         for e in referral["history"]:
             by = e.pop("by_user")
@@ -1677,9 +1686,8 @@ def create_app(settings: Optional[Settings] = None,
         store.audit(r["user_id"], f"partner:{partner['id']}", "partner.updated_referral",
                     {"partner": partner["name"], "program": program, "status": body.status})
         if body.status == "scheduled" and r["status"] != "scheduled":
-            notifier.notify(r["user_id"], "referral",
-                            f"{partner['name']} scheduled your appointment: {program}. "
-                            "They or your clinic will be in touch with details.")
+            notifier.notify(r["user_id"], "referral", N.say(store.user_lang(r["user_id"]), N.PARTNER_SCHEDULED,
+                                                            translate=("program",), partner=partner["name"], program=program))
         return partner_view(partner, updated)
 
     @app.get("/v1/partner/referrals/{referral_id}/canrisk", response_class=Response)
@@ -1702,7 +1710,8 @@ def create_app(settings: Optional[Settings] = None,
         rid = store.add_risk_result(r["user_id"], partner["id"], referral_id, body.model_dump())
         store.audit(r["user_id"], f"partner:{partner['id']}", "partner.risk_assessment",
                     {"partner": partner["name"], "model": body.model})
-        notifier.notify(r["user_id"], "risk", f"{partner['name']} shared your {body.model} risk assessment.")
+        notifier.notify(r["user_id"], "risk", N.say(store.user_lang(r["user_id"]), N.RISK_SHARED, partner=partner["name"],
+                                                    model=body.model))
         return {"id": rid}
 
     # --- platform admin: manage referral partners -------------------------------------------
@@ -2073,12 +2082,12 @@ def create_app(settings: Optional[Settings] = None,
         store.update_booking(booking_id, status=body.status,
                              scheduled_for=body.scheduled_for.isoformat() if body.scheduled_for else None, note=body.note)
         store.audit(b["user_id"], f"partner:{partner['id']}", f"booking.{body.status}", {"partner": partner["name"]})
-        names = ", ".join(bookings.TESTS[t]["name"].split(" (")[0] for t in b["tests"])
-        msg = {"scheduled": f"{partner['name']} confirmed your {names}"
-                            + (f" for {formatday(body.scheduled_for.isoformat())}" if body.scheduled_for else "") + ".",
-               "sample_collected": f"{partner['name']} has collected your sample. Results will appear in the app.",
-               "completed": f"{partner['name']} has completed your {names}.",
-               "cancelled": f"{partner['name']} cancelled your {names} booking" + (f": {body.note}" if body.note else ".")}[body.status]
+        names = [bookings.TESTS[t]["name"].split(" (")[0] for t in b["tests"]]
+        template = {"scheduled": N.BOOKING_CONFIRMED_ON if body.scheduled_for else N.BOOKING_CONFIRMED,
+                    "sample_collected": N.BOOKING_SAMPLE, "completed": N.BOOKING_DONE,
+                    "cancelled": N.BOOKING_CANCELLED_NOTE if body.note else N.BOOKING_CANCELLED}[body.status]
+        msg = N.say(store.user_lang(b["user_id"]), template, translate=("tests",), partner=partner["name"], tests=names,
+                    date=formatday(body.scheduled_for.isoformat()) if body.scheduled_for else "", note=body.note or "")
         notifier.notify(b["user_id"], "booking", msg)
         return partner_booking_out(store.booking(booking_id, with_contact=True))
 
@@ -2102,8 +2111,7 @@ def create_app(settings: Optional[Settings] = None,
         store.update_booking(booking_id, status="completed")
         store.audit(b["user_id"], f"partner:{partner['id']}", "booking.results", {"partner": partner["name"],
                                                                                    "results": len(kept)})
-        notifier.notify(b["user_id"], "booking", f"Your test results from {partner['name']} are in. "
-                                                 "Your insights have been updated.")
+        notifier.notify(b["user_id"], "booking", N.say(store.user_lang(b["user_id"]), N.RESULTS_IN, partner=partner["name"]))
         return {"accepted": len(kept), "ignored": len(fragment.observations) - len(kept), "merged": result["merged"]}
 
     @app.post("/admin/tasks/reminders", dependencies=[Depends(require_admin)])
@@ -2112,8 +2120,10 @@ def create_app(settings: Optional[Settings] = None,
         now, sent = bookings.utcnow(), 0
         for uid in store.user_ids():
             mine = store.bookings_for_user(uid)
-            report = generate_insights(effective_profile(store, uid))
-            for key, kind, message in bookings.due_reminders(now, report.insights, mine, store.nudges(uid)):
+            lang = store.user_lang(uid)
+            with insight_language(lang):
+                report = generate_insights(effective_profile(store, uid))
+            for key, kind, message in bookings.due_reminders(now, report.insights, mine, store.nudges(uid), lang):
                 notifier.notify(uid, kind, message)
                 store.record_nudge(uid, key, now.isoformat())
                 sent += 1
@@ -2359,10 +2369,9 @@ def create_app(settings: Optional[Settings] = None,
         )
         store.audit(user_id, "user", "family.link_accepted", {"link_id": link_id})
         store.audit(inv["inviter_id"], "system", "family.link_created", {"link_id": link_id})
-        notifier.notify(inv["inviter_id"], "invitation_accepted",
-                     f"Your {inv['relationship'].replace('_', ' ')} accepted your invitation"
-                     + ("" if body.share_level != "none" else " but isn't sharing their history yet")
-                     + ". Your insights now include what they share.")
+        notifier.notify(inv["inviter_id"], "invitation_accepted", N.say(
+            store.user_lang(inv["inviter_id"]), N.INVITE_ACCEPTED if body.share_level != "none" else N.INVITE_ACCEPTED_NOT_SHARING,
+            translate=("who",), who=(inv["relationship"] or "relative").replace("_", " ")))
         # Results already on file that run in families should reach the new relative.
         notify_cascade(store, inv["inviter_id"], cascade_categories(store.get_profile(inv["inviter_id"])),
                        only_relative=user_id, notify=notifier.notify)
@@ -2608,7 +2617,7 @@ def create_app(settings: Optional[Settings] = None,
         if g is None:
             raise HTTPException(404, "No such grievance")
         store.audit(g["user_id"], "privacy_officer", "privacy.grievance_answered", {"id": gid, "status": body.status})
-        notifier.notify(g["user_id"], "privacy", f"Answer to your privacy concern: {body.response}")
+        notifier.notify(g["user_id"], "privacy", N.say(store.user_lang(g["user_id"]), N.PRIVACY_ANSWER, answer=body.response))
         return g
 
     @app.post("/admin/breaches", status_code=201, dependencies=[Depends(require_admin)])
@@ -2670,6 +2679,13 @@ def create_app(settings: Optional[Settings] = None,
 
     def care_name(m: FamilyMember) -> str:
         return m.name or m.label
+
+    def care_name_in(m: FamilyMember, lang: str) -> str:
+        """The relative's name, or their relationship in the reader's language."""
+        return m.name or N.say(lang, "{who}", translate=("who",), who=m.label)
+
+    def member_of(owner_id: str, member_id: str) -> FamilyMember:
+        return care_member(owner_id, member_id)
 
     def care_out(owner_id: str, member_id: str, role: str, user_id: str) -> dict:
         m = care_member(owner_id, member_id)
@@ -2817,7 +2833,9 @@ def create_app(settings: Optional[Settings] = None,
         store.add_caregiver(owner_id, member_id, user_id, body.name if body else None)
         store.audit(owner_id, user_id, "care.joined", {"member_id": member_id})
         name = care_name(care_member(owner_id, member_id))
-        notifier.notify(owner_id, "care", f"{(body.name if body and body.name else 'Someone')} joined the care circle for {name}.")
+        lang = store.user_lang(owner_id)
+        joiner = body.name if body and body.name else N.say(lang, N.SOMEONE)
+        notifier.notify(owner_id, "care", N.say(lang, N.CARE_JOINED, name=joiner, who=care_name_in(member_of(owner_id, member_id), lang)))
         return care_out(owner_id, member_id, "caregiver", user_id)
 
     @app.delete("/v1/care/{care_id}/caregivers/{caregiver_id}", status_code=204)
@@ -2874,7 +2892,7 @@ def create_app(settings: Optional[Settings] = None,
                                 headers=headers)
         store.audit(link["owner_id"], "emergency_link", "care.emergency_viewed", {"member_id": member.id, "link": link["id"]})
         for uid in {link["owner_id"], *(c["user_id"] for c in store.caregivers(link["owner_id"], member.id))}:
-            notifier.notify(uid, "care", f"{care_name(member)}'s emergency summary was just opened from a shared link.")
+            notifier.notify(uid, "care", N.say(store.user_lang(uid), N.EMERGENCY_OPENED, who=care_name_in(member, store.user_lang(uid))))
         return HTMLResponse(emergency.render_html(emergency.summary(member), expires=link["expires_at"]), headers=headers)
 
     @app.post("/admin/tasks/care", dependencies=[Depends(require_admin)])
@@ -2887,7 +2905,7 @@ def create_app(settings: Optional[Settings] = None,
             log = store.dose_log(owner_id, member_id, today.isoformat())
             done = {n["key"] for n in store.nudges(owner_id)}
             circle = {owner_id, *(c["user_id"] for c in store.caregivers(owner_id, member_id))}
-            by_lang = {lang: dict(care.due_care_alerts(now, care_name(member), member, log, lang))
+            by_lang = {lang: dict(care.due_care_alerts(now, care_name_in(member, lang), member, log, lang))
                        for lang in {store.user_lang(uid) for uid in circle}}
             for key in next(iter(by_lang.values())):
                 if key in done:

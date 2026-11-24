@@ -16,19 +16,27 @@ The app is in **English and Hindi**. The WhatsApp assistant also replies in Beng
 
 ## What follows the person's language on the server
 
-- Lock-screen push texts (`fhg/push.py`).
-- Caregiver reminders, missed-dose notices and refill alerts (`fhg/care.py`), each in the recipient's own
-  language, so siblings in one care circle can use different languages.
-- WhatsApp replies.
+The server keeps each person's language (`PUT /v1/profile/language`) and uses it for everything it writes to them:
 
-## Still in English
+- **Action items.** Title, summary, evidence and what to do, plus the risk page and the disclaimer. The rules in
+  `fhg/insights/rules.py` write all their text through `tr("English template {value}", value=...)`, and the
+  Hindi is in `fhg/insights/hi.py`. `GET /v1/insights?lang=hi` overrides the stored language. The app sends its
+  own.
+- **In-app notices** (`fhg/notices.py`, Hindi in `fhg/notices_hi.py`): bookings, results, test reminders,
+  referrals, invitations, the care circle, emergency-link openings, family alerts and privacy answers. Each is
+  written in the recipient's language, so two siblings can each get their own.
+- **Caregiver reminders** (`fhg/care.py`), **lock-screen pushes** (`fhg/push.py`) and **WhatsApp replies**.
 
-These are the next pieces to translate:
-- **Action item details.** The titles are translated, but the explanations, evidence and recommendations come from
-  the rules in `fhg/insights/rules.py`, which build sentences in English.
-- **Other in-app notices** from the server: bookings, referrals, the care circle, privacy answers.
-- **The privacy notice** is in English and Hindi already (`fhg/privacy.py`).
-- **The doctor summary and emergency summary.** These are kept in English on purpose, since clinicians read them.
+`tests/test_insight_language.py` reads every `tr()` and `mark()` template in the rules, risk models and notices. It
+fails if any template lacks Hindi, or a placeholder changes. It also checks that a Hindi report contains no English
+sentences.
+
+## Deliberately in English
+
+- **The doctor summary, the emergency summary, and anything partners or clinics receive.** Clinicians read these,
+  and the language context defaults to English, so they stay English automatically.
+- **Breach notices** are written by the privacy officer in the console.
+- **The AI plain-language summary** (an optional feature).
 
 ## Adding a language
 

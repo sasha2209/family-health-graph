@@ -11,6 +11,9 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
+from .insights.lang import join_and, language, tr
+from .notices import LAB_UNCONFIRMED, RESULTS_LATE, TEST_REMINDER, say
+
 # Bookable tests. `observations` are the result codes that may be posted back for the test.
 TESTS: dict[str, dict] = {
     "hba1c": {"name": "HbA1c (3-month blood sugar)", "observations": {"hba1c"},
@@ -62,7 +65,8 @@ def offers(rule_id: str, partners: list[dict]) -> list[dict]:
     return out
 
 
-def due_reminders(now: datetime, insights: list, bookings: list[dict], nudges: list[dict]) -> list[tuple[str, str, str]]:
+def due_reminders(now: datetime, insights: list, bookings: list[dict], nudges: list[dict],
+                  lang: str = "en") -> list[tuple[str, str, str]]:
     """What to remind one person about: [(key, kind, message)]. ``key`` de-duplicates nudges."""
     out = []
     sent = {}
@@ -77,20 +81,18 @@ def due_reminders(now: datetime, insights: list, bookings: list[dict], nudges: l
         key = f"booking:{b['id']}"
         if b["status"] == "requested" and now - datetime.fromisoformat(b["created_at"]) >= timedelta(days=UNCONFIRMED_DAYS):
             if allowed(key):
-                out.append((key, "booking", f"{b['partner_name']} hasn't confirmed your test booking yet. "
-                                            "You can wait, or cancel and choose another lab in the app."))
+                out.append((key, "booking", say(lang, LAB_UNCONFIRMED, partner=b["partner_name"])))
         elif b["status"] in ("scheduled", "sample_collected") and b.get("scheduled_for"):
             when = date.fromisoformat(b["scheduled_for"][:10])
             if (now.date() - when).days >= OVERDUE_DAYS and allowed(key):
-                out.append((key, "booking", f"Your results from {b['partner_name']} aren't in yet. "
-                                            "If the test was done, they'll appear in the app once the lab sends them."))
+                out.append((key, "booking", say(lang, RESULTS_LATE, partner=b["partner_name"])))
     handled = {b["rule_id"] for b in bookings if b.get("rule_id") and (b["status"] in ACTIVE or b["status"].startswith("completed"))}
     for insight in insights:
         rid = insight.rule_id
         if rid in RECOMMENDED and rid not in handled and allowed(f"insight:{rid}"):
-            names = " and ".join(TESTS[c]["name"].split(" (")[0] for c in RECOMMENDED[rid])
-            out.append((f"insight:{rid}", "reminder",
-                        f"Reminder: {insight.title}. A {names} test is the next step; you can book one in the app."))
+            with language(lang):
+                names = join_and([tr(TESTS[c]["name"].split(" (")[0]) for c in RECOMMENDED[rid]])
+            out.append((f"insight:{rid}", "reminder", say(lang, TEST_REMINDER, item=insight.title, tests=names)))
     return out
 
 
