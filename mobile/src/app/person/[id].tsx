@@ -46,6 +46,7 @@ export default function PersonScreen() {
   const { api } = useSession();
   const c = usePalette();
   const { data: m, error, refreshing, reload } = useLoader(() => api.familyMember(id));
+  const { data: me } = useLoader(() => api.me());
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
   const [age, setAge] = useState('');
@@ -92,6 +93,14 @@ export default function PersonScreen() {
           </View>
           <ErrorText>{saveError}</ErrorText>
         </Card>
+      )}
+
+      {!m.deceased && me && (
+        <Section title="Caregiver mode">
+          <Row title={`Help ${m.name ?? 'them'} with medicines`}
+               detail="Daily reminders, refill alerts, an emergency summary, and siblings can help"
+               onPress={() => router.push({ pathname: '/care', params: { id: `${me.user_id}.${m.id}` } })} last />
+        </Section>
       )}
 
       <Section title="Diagnoses">

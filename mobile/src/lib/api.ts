@@ -16,6 +16,10 @@ import type {
   Booking,
   TestOffer,
   RiskReport,
+  CareDetail,
+  CareInfo,
+  CareSummary,
+  Slot,
   Connection,
   Grant,
   OAuthRequestInfo,
@@ -134,6 +138,30 @@ export function createApi(token: string | null) {
     grants: () => authed<Grant[]>('/v1/grants'),
     revokeGrant: (id: string) => authed<void>(`/v1/grants/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     risk: () => authed<RiskReport>('/v1/risk'),
+    care: () => authed<CareSummary[]>('/v1/care'),
+    careDetail: (id: string) => authed<CareDetail>(`/v1/care/${encodeURIComponent(id)}`),
+    careSetInfo: (id: string, body: CareInfo) =>
+      authed<CareDetail>(`/v1/care/${encodeURIComponent(id)}/info`, { method: 'PUT', body }),
+    careAddMedication: (id: string, body: { name: string; dosage?: string; stock?: number }) =>
+      authed<CareDetail>(`/v1/care/${encodeURIComponent(id)}/medications`, { method: 'POST', body }),
+    careUpdateMedication: (id: string, medId: string, body: { reminders?: boolean; stock?: number | null;
+                                                              schedule?: Partial<Record<Slot, number>>; status?: 'active' | 'stopped' }) =>
+      authed<CareDetail>(`/v1/care/${encodeURIComponent(id)}/medications/${encodeURIComponent(medId)}`,
+        { method: 'PATCH', body }),
+    careMarkDose: (id: string, body: { med_id: string; slot: Slot; status: 'taken' | 'skipped' | null }) =>
+      authed<CareDetail>(`/v1/care/${encodeURIComponent(id)}/doses`, { method: 'POST', body }),
+    careInvite: (id: string) =>
+      authed<{ url: string; message: string; expires_at: string }>(`/v1/care/${encodeURIComponent(id)}/invite`, { method: 'POST' }),
+    careJoin: (inviteToken: string, name?: string) =>
+      authed<CareDetail>(`/v1/care/join/${encodeURIComponent(inviteToken)}`, { method: 'POST', body: { name } }),
+    careRemove: (id: string, caregiverId: string) =>
+      authed<void>(`/v1/care/${encodeURIComponent(id)}/caregivers/${encodeURIComponent(caregiverId)}`, { method: 'DELETE' }),
+    careSummaryHtml: (id: string) => requestText(`/v1/care/${encodeURIComponent(id)}/summary`, token),
+    careEmergencyLink: (id: string, hours: number) =>
+      authed<{ id: string; url: string; expires_at: string }>(`/v1/care/${encodeURIComponent(id)}/emergency-links`,
+        { method: 'POST', body: { hours } }),
+    careRevokeLink: (id: string, linkId: string) =>
+      authed<void>(`/v1/care/${encodeURIComponent(id)}/emergency-links/${encodeURIComponent(linkId)}`, { method: 'DELETE' }),
     canriskFile: () => requestText('/v1/risk/canrisk', token),
     insightTests: (ruleId: string) =>
       authed<{ tests: TestOffer[]; bookings: Booking[] }>(`/v1/insights/${encodeURIComponent(ruleId)}/tests`),
