@@ -35,14 +35,15 @@
   .hidden { display: none !important; }
   .steps { counter-reset: s; list-style: none; padding: 0; }
   .steps li { counter-increment: s; position: relative; padding-left: 34px; margin: 10px 0; }
-  .lang { float: right; font-size: 14px; min-height: 36px; padding: 0 12px; }
+  .lang-switch { float: right; display: flex; gap: 6px; }
+  .lang { font-size: 14px; min-height: 36px; padding: 0 12px; }
   .steps li::before { content: counter(s); position: absolute; left: 0; top: 0; width: 24px; height: 24px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 13px; display: grid; place-items: center; }
 </style>
 </head>
 <body>
 <main>
   <section id="intro" class="card">
-    <button class="lang" id="lang" type="button" aria-label="Language">हिन्दी</button>
+    <span class="lang-switch" id="lang" role="group" aria-label="Language"></span>
     <div class="eyebrow" data-i18n="eyebrow">Before your visit</div>
     <h1 id="title">Share your family health history</h1>
     <p id="lede" data-i18n="lede">Your care team asks you to share what you know about your family's health. It takes about two minutes.</p>
@@ -101,7 +102,7 @@ const TEXT = {
     privacy: "Your information is encrypted, never sold, and never shared with insurers or employers. You can disconnect from the clinic at any time. This is not a diagnosis.",
     start: "Start", open_app: "Open in the app", about: "About you", name: "Your name, as the clinic knows you", dob: "Date of birth",
     sex: "Sex", choose: "Choose…", female: "Female", male: "Male", other: "Other", family: "Your family's health",
-    family_help: "Who had what, and how old they were if you know. \"In her 50s\" is fine. Include grandparents, aunts and uncles if you can. Hindi or Hinglish is fine too.",
+    family_help: "Who had what, and how old they were if you know. \"In her 50s\" is fine. Include grandparents, aunts and uncles if you can. You can also write in Hindi or Marathi.",
     history_ph: "My mom had breast cancer at 46.\nDad had a heart attack at 51.\nMy mother's sister had ovarian cancer.",
     name_ph: "e.g. Priya Shah", check: "Check what you understood", submit: "Share with my clinic", done: "Done",
     done_text: "Your care team will see it before your visit. Thank you.", see_insights: "See your own insights",
@@ -111,7 +112,7 @@ const TEXT = {
     understood: "We understood:", not_right: "Not right? Edit the text and check again.",
     nothing_found: "We couldn't find any relatives or conditions. Try sentences like “My mother had breast cancer at 46.”",
     need_name: "Please enter your name so the clinic can match your record.", need_consent: "Please tick the box to agree to share with your clinic.",
-    bad_link: "This link isn't working", bad_link_help: "Ask your clinic for a new link.", switch: "हिन्दी",
+    bad_link: "This link isn't working", bad_link_help: "Ask your clinic for a new link.",
   },
   hi: {
     eyebrow: "मुलाक़ात से पहले", lede: "आपकी देखभाल टीम चाहती है कि आप अपने परिवार के स्वास्थ्य के बारे में जो जानते हैं, वह बताएँ। इसमें लगभग दो मिनट लगते हैं।",
@@ -130,33 +131,67 @@ const TEXT = {
     understood: "हमने यह समझा:", not_right: "सही नहीं है? टेक्स्ट बदलें और फिर से देखें।",
     nothing_found: "हमें कोई रिश्तेदार या बीमारी नहीं मिली। ऐसे लिखें: “माँ को 46 की उम्र में स्तन कैंसर हुआ था।”",
     need_name: "कृपया अपना नाम लिखें, ताकि क्लिनिक आपका रिकॉर्ड मिला सके।", need_consent: "क्लिनिक के साथ साझा करने के लिए कृपया बॉक्स पर टिक करें।",
-    bad_link: "यह लिंक काम नहीं कर रहा", bad_link_help: "अपने क्लिनिक से नया लिंक माँगें।", switch: "English",
+    bad_link: "यह लिंक काम नहीं कर रहा", bad_link_help: "अपने क्लिनिक से नया लिंक माँगें।",
+  },
+  mr: {
+    eyebrow: "भेटीपूर्वी", lede: "तुमच्या कुटुंबाच्या आरोग्याबद्दल तुम्हाला जे माहीत आहे ते सांगा, असे तुमची काळजी टीम विचारत आहे. साधारण दोन मिनिटे लागतात.",
+    step1: "कुटुंबात कोणाला कोणता आजार होता, ते तुमच्या शब्दांत सांगा.", step2: "आम्हाला काय समजले ते तपासा.",
+    step3: "ते तुमच्या क्लिनिकशी शेअर करा. कशाकडे पुढे लक्ष द्यायचे, जसे लवकर तपासणी, हे त्यांना दिसेल.",
+    privacy: "तुमची माहिती एन्क्रिप्टेड असते, कधीही विकली जात नाही, आणि विमा कंपन्या किंवा नियोक्त्यांना कधीही दिली जात नाही. तुम्ही कधीही क्लिनिकची जोडणी काढू शकता. हे निदान नाही.",
+    start: "सुरू करा", open_app: "अ‍ॅपमध्ये उघडा", about: "तुमच्याबद्दल", name: "क्लिनिकमध्ये नोंदवलेले तुमचे नाव", dob: "जन्मतारीख",
+    sex: "लिंग", choose: "निवडा…", female: "स्त्री", male: "पुरुष", other: "इतर", family: "तुमच्या कुटुंबाचे आरोग्य",
+    family_help: "कोणाला काय झाले, आणि माहीत असल्यास कोणत्या वयात. \"पन्नाशीत\" असे लिहिले तरी चालेल. शक्य असल्यास आजी-आजोबा, काका-मामा, मावशी-आत्या यांनाही धरा. मराठी, किंवा इंग्रजी अक्षरांत मराठी लिहिले तरी चालेल.",
+    history_ph: "माझ्या आईला 46 व्या वर्षी स्तनाचा कर्करोग झाला.\nबाबांना 51 व्या वर्षी हृदयविकाराचा झटका आला.\nमावशीला अंडाशयाचा कर्करोग होता.",
+    name_ph: "उदा. प्रिया शाह", check: "आम्हाला काय समजले ते तपासा", submit: "माझ्या क्लिनिकशी शेअर करा", done: "झाले",
+    done_text: "तुमच्या भेटीपूर्वी तुमची काळजी टीम हे पाहील. धन्यवाद.", see_insights: "तुमचे सल्ले पाहा",
+    get_app: "तुमची नोंद अपडेट ठेवण्यासाठी, नातेवाइकांना जोडण्यासाठी आणि ईमेलने खाते सुरक्षित करण्यासाठी Family Health Graph अ‍ॅप घ्या.",
+    title: (c) => `${c} तुम्हाला तुमचा कौटुंबिक आरोग्य इतिहास शेअर करण्यास सांगत आहे`, consent: (c) => `माझा कौटुंबिक आरोग्य इतिहास आणि सल्ले ${c} शी शेअर करा. मी कधीही जोडणी काढू शकतो/शकते.`,
+    done_title: (c) => `${c} शी शेअर झाले`, doc_title: (c) => `${c} · भेटीपूर्वीचा कौटुंबिक इतिहास`,
+    understood: "आम्हाला हे समजले:", not_right: "बरोबर नाही? मजकूर बदला आणि पुन्हा तपासा.",
+    nothing_found: "आम्हाला कोणतेही नातेवाईक किंवा आजार सापडले नाहीत. असे लिहून पाहा: “माझ्या आईला 46 व्या वर्षी स्तनाचा कर्करोग झाला.”",
+    need_name: "क्लिनिकला तुमची नोंद जुळवता यावी म्हणून कृपया तुमचे नाव लिहा.", need_consent: "क्लिनिकशी शेअर करण्यास संमती देण्यासाठी कृपया बॉक्सवर टिक करा.",
+    bad_link: "ही लिंक चालत नाही", bad_link_help: "तुमच्या क्लिनिककडून नवीन लिंक मागा.",
   },
 };
+const LANG_NAMES = { en: "English", hi: "हिन्दी", mr: "मराठी" };
 const REL_HI = { mother: "माँ", father: "पिता", sister: "बहन", brother: "भाई", daughter: "बेटी", son: "बेटा",
   maternal_grandmother: "नानी", maternal_grandfather: "नाना", paternal_grandmother: "दादी", paternal_grandfather: "दादा",
   maternal_aunt: "मौसी", maternal_uncle: "मामा", paternal_aunt: "बुआ", paternal_uncle: "चाचा/ताऊ", cousin: "चचेरे/ममेरे भाई-बहन",
   niece: "भतीजी/भांजी", nephew: "भतीजा/भांजा", grandmother: "दादी/नानी", grandfather: "दादा/नाना" };
+const REL_MR = { mother: "आई", father: "वडील", sister: "बहीण", brother: "भाऊ", daughter: "मुलगी", son: "मुलगा",
+  maternal_grandmother: "आजी (आईकडील)", maternal_grandfather: "आजोबा (आईकडील)", paternal_grandmother: "आजी (वडिलांकडील)",
+  paternal_grandfather: "आजोबा (वडिलांकडील)", maternal_aunt: "मावशी", maternal_uncle: "मामा", paternal_aunt: "आत्या",
+  paternal_uncle: "काका", cousin: "चुलत/मामे भावंड", niece: "पुतणी/भाची", nephew: "पुतण्या/भाचा", grandmother: "आजी",
+  grandfather: "आजोबा" };
+const REL = { hi: REL_HI, mr: REL_MR };
 let lang = (() => {
   const q = new URLSearchParams(location.search).get("lang");
-  if (q === "hi" || q === "en") return q;
-  try { const saved = localStorage.getItem("fhg_lang"); if (saved === "hi" || saved === "en") return saved; } catch (e) {}
-  return (navigator.language || "").toLowerCase().startsWith("hi") ? "hi" : "en";
+  if (q in TEXT) return q;
+  try { const saved = localStorage.getItem("fhg_lang"); if (saved in TEXT) return saved; } catch (e) {}
+  const nav = (navigator.language || "").toLowerCase().slice(0, 2);
+  return nav in TEXT ? nav : "en";
 })();
 const T = (k) => TEXT[lang][k];
 function applyLang() {
   document.documentElement.lang = lang;
   document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = T(el.dataset.i18n); });
   $("history").placeholder = T("history_ph"); $("name").placeholder = T("name_ph");
-  $("lang").textContent = T("switch");
+  // English first, then the clinic's language, then the other one.
+  const order = ["en", clinicLang, ...Object.keys(TEXT)].filter((l, i, a) => a.indexOf(l) === i);
+  $("lang").innerHTML = order.filter((l) => l !== lang)
+    .map((l) => `<button class="lang" type="button" data-lang="${l}" lang="${l}">${LANG_NAMES[l]}</button>`).join("");
   if (clinicName !== "your clinic") {
     document.title = T("doc_title")(clinicName); $("title").textContent = T("title")(clinicName);
     $("consent-text").textContent = T("consent")(clinicName); $("done-title").textContent = T("done_title")(clinicName);
   }
 }
-$("lang").onclick = () => { lang = lang === "hi" ? "en" : "hi"; try { localStorage.setItem("fhg_lang", lang); } catch (e) {} applyLang(); };
+$("lang").onclick = (e) => {
+  const next = e.target.closest("button")?.dataset.lang;
+  if (!next) return;
+  lang = next; try { localStorage.setItem("fhg_lang", lang); } catch (err) {} applyLang();
+};
 const KEY = "fhg_token";  // shared with the web dashboard at /, so "See your insights" opens this account
-let token = null, clinicName = "your clinic";
+let token = null, clinicName = "your clinic", clinicLang = "hi";
 try { token = localStorage.getItem(KEY); } catch (e) {}
 
 async function api(path, opts = {}) {
@@ -175,7 +210,7 @@ async function ensureAccount() {
 (async () => {
   try {
     const c = await api(`/v1/public/clinics/${encodeURIComponent(code)}`);
-    clinicName = c.name;
+    clinicName = c.name; clinicLang = c.lang || "hi";
     applyLang();
     $("open-app").href = `familyhealth://clinic/${encodeURIComponent(c.code)}`;
   } catch (e) {
@@ -190,9 +225,9 @@ $("check").onclick = async () => {
   const text = $("history").value.trim(); if (!text) return;
   try {
     await ensureAccount();
-    const r = await api("/v1/ingest/text?preview=true", { method: "POST", body: JSON.stringify({ text }) });
-    const rel = (x) => (lang === "hi" && REL_HI[x]) || x.replace(/_/g, " ");
-    const lines = r.parsed.family.map((m) => `${rel(m.relationship)}: ${m.conditions.map((c) => c.name + (c.onset_age != null ? ` (${c.age_estimated ? "~" : ""}${c.onset_age})` : "")).join(", ")}`);
+    const r = await api(`/v1/ingest/text?preview=true&lang=${lang}`, { method: "POST", body: JSON.stringify({ text }) });
+    const rel = (x) => (REL[lang] && REL[lang][x]) || x.replace(/_/g, " ");
+    const lines = r.parsed.family.map((m) => `${rel(m.relationship)}: ${m.conditions.map((c) => (c.display || c.name) + (c.onset_age != null ? ` (${c.age_estimated ? "~" : ""}${c.onset_age})` : "")).join(", ")}`);
     $("understood").innerHTML = lines.length
       ? `<b>${esc(T("understood"))}</b><ul>${lines.map((l) => `<li style="text-transform:none">${esc(l.charAt(0).toUpperCase() + l.slice(1))}</li>`).join("")}</ul><span class="muted">${esc(T("not_right"))}</span>`
       : esc(T("nothing_found"));

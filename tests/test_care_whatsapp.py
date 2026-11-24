@@ -117,3 +117,18 @@ def test_family_can_turn_it_off_and_others_cannot(api, wa):
 def test_unknown_numbers_still_get_the_normal_reply(api, wa):
     say(api, "hello", sender="919811111111")
     assert "isn't connected" in wa.sent[-1][1]
+
+
+def test_marathi_reminders(api, wa, monkeypatch):
+    h, cid = setup_mother(api)
+    api.put(f"/v1/care/{cid}/whatsapp", headers=h, json={"phone": "98000 11122", "lang": "mr", "agreed": True})
+    assert wa.templates[-1] == (PARENT, "care_optin", "mr", [])
+    say(api, "होय")
+    assert wa.sent[-1] == (PARENT, care.wa_text("mr", "active"))
+    at(monkeypatch, 8)
+    api.post("/admin/tasks/care", headers=ADMIN)
+    assert wa.templates[-1] == (PARENT, "medicine_reminder", "mr", ["सकाळ", "Glycomet 500, Telma 40"])
+    say(api, "घेतली")
+    assert wa.sent[-1] == (PARENT, care.wa_text("mr", "taken", names="Glycomet 500, Telma 40"))
+    say(api, "नको")
+    assert wa.sent[-1] == (PARENT, care.wa_text("mr", "stopped"))

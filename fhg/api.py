@@ -35,7 +35,7 @@ from .family_links import (
 from . import documents as docs
 from .ingest import CsvImportError, parse_family_csv, parse_family_history_text, parse_fhir, to_fhir_bundle
 from .insights import generate_insights, summarize
-from .insights.lang import language as insight_language
+from .insights.lang import TABLES as insight_tables, language as insight_language, tr as insight_tr
 from . import notices as N
 from .merge import find_match, merge_into
 from .models import CareInfo, Condition, FamilyMember, HealthProfile, Medication, Observation, Relationship, Sex
@@ -308,6 +308,13 @@ class OrgIn(BaseModel):
     name: str = Field(..., min_length=2, max_length=120)
 
 
+LANG_NAME = {"hi": "Hindi", "mr": "Marathi"}
+
+
+class OrgLanguageIn(BaseModel):
+    lang: str = Field(pattern="^(hi|mr)$", description="The clinic's patients' language, shown next to English")
+
+
 class CodeIn(BaseModel):
     code: str = Field(..., min_length=4, max_length=20)
 
@@ -395,7 +402,7 @@ class LanguageIn(BaseModel):
 
 class CareWhatsAppIn(BaseModel):
     phone: str = Field(min_length=7, max_length=24, description="Their own WhatsApp number")
-    lang: str = Field("en", pattern="^(en|hi)$")
+    lang: str = Field("en", pattern="^(en|hi|mr)$")
     agreed: bool = Field(description="They agreed to get reminders on WhatsApp")
 
 
@@ -913,13 +920,22 @@ def create_app(settings: Optional[Settings] = None,
 
     @app.post("/v1/ingest/text")
     def ingest_text(body: TextIn, preview: bool = Query(False),
+                    lang: Optional[str] = Query(None, pattern="^[a-z]{2}$",
+                                                description="Adds each condition's name in this language"),
                     user_id: str = Depends(current_user)) -> dict:
         fragment = parse_family_history_text(body.text)
         warnings = [] if (fragment.family or fragment.conditions) else [
             "No relatives or conditions were recognised. Try sentences like "
             "'My mother had breast cancer at 46.'"
         ]
-        return ingest(user_id, "text", body.text, fragment, preview, warnings)
+        out = ingest(user_id, "text", body.text, fragment, preview, warnings)
+        if lang:  # the intake page shows "what we understood" in the reader's language
+            parsed = out.get("parsed") or {}
+            with insight_language(lang):
+                for c in [c for m in parsed.get("family", []) for c in m["conditions"]] + parsed.get("conditions", []):
+                    concept = _CONCEPTS.get(c.get("category"))
+                    c["display"] = insight_tr(concept.display) if concept else c["name"]
+        return out
 
     @app.post("/v1/ingest/csv")
     def ingest_csv(body: CsvIn, preview: bool = Query(False),
@@ -1463,7 +1479,7 @@ def create_app(settings: Optional[Settings] = None,
 
     # --- insights ------------------------------------------------------------------
     def person_lang(user_id: str, override: Optional[str]) -> str:
-        return override if override in ("en", "hi") else store.user_lang(user_id)
+        return override if override in ("en", *insight_tables) else store.user_lang(user_id)
 
     @app.get("/v1/insights")
     def insights(lang: Optional[str] = Query(None, pattern="^[a-z]{2}$", description="Language; default: the person's"),
@@ -1528,8 +1544,11 @@ def create_app(settings: Optional[Settings] = None,
     def intake_url(org: dict, request: Optional[Request] = None) -> str:
         return f"{public_base(request)}/c/{org['patient_code']}"
 
+    def org_lang(org: dict) -> str:
+        return org.get("lang") or "hi"
+
     def org_public(org: dict, role: Optional[str] = None, request: Optional[Request] = None) -> dict:
-        out = {"id": org["id"], "name": org["name"]}
+        out = {"id": org["id"], "name": org["name"], "lang": org_lang(org)}
         if role:
             out |= {"role": role, "patient_code": org["patient_code"], "intake_url": intake_url(org, request)}
         if role == "admin":
@@ -1548,6 +1567,17 @@ def create_app(settings: Optional[Settings] = None,
         store.add_staff(org["id"], user_id)
         store.audit(user_id, "user", "org.staff_joined", {"org_id": org["id"]})
         return org_public(org, store.staff_role(org["id"], user_id))
+
+    @app.put("/v1/orgs/{org_id}/language")
+    def set_org_language(org_id: str, body: OrgLanguageIn, user_id: str = Depends(current_user)) -> dict:
+        """The language printed next to English on the poster and staff guide, and offered first on the intake page
+        (Hindi by default; Marathi for Pune)."""
+        staff_org(org_id, user_id)
+        if store.staff_role(org_id, user_id) != "admin":
+            raise HTTPException(403, "Only the clinic's admin can change this")
+        store.set_org_lang(org_id, body.lang)
+        store.audit(user_id, "user", "org.language", {"org_id": org_id, "lang": body.lang})
+        return {"lang": body.lang}
 
     @app.get("/v1/orgs")
     def my_orgs(user_id: str = Depends(current_user)) -> list[dict]:
@@ -2200,7 +2230,7 @@ def create_app(settings: Optional[Settings] = None,
     def public_clinic(code: str) -> dict:
         """Just the clinic's name, so the intake page can say who you're sharing with."""
         org = clinic_by_code_or_404(code)
-        return {"name": org["name"], "code": org["patient_code"]}
+        return {"name": org["name"], "code": org["patient_code"], "lang": org_lang(org)}
 
     @app.get("/c/{code}", response_class=HTMLResponse, include_in_schema=False)
     def intake_page(code: str) -> str:
@@ -2228,11 +2258,12 @@ def create_app(settings: Optional[Settings] = None,
         url = intake_url(org, request)
         return (PKG_DIR / "static" / "poster.html").read_text().replace(
             "{{CLINIC}}", esc(org["name"])).replace("{{URL}}", esc(url)).replace(
-            "{{CODE}}", esc(org["patient_code"]))
+            "{{CODE}}", esc(org["patient_code"])).replace("{{LANG}}", org_lang(org)).replace(
+            "{{LANGNAME}}", LANG_NAME[org_lang(org)])
 
     @app.get("/c/{code}/staff-guide", response_class=HTMLResponse, include_in_schema=False)
     def intake_staff_guide(code: str, request: Request) -> str:
-        """A printable one-pager for the clinic's staff: reception script (English and Hindi), patient questions,
+        """A printable one-pager for the clinic's staff: reception script (English and the clinic's language), patient questions,
         using the portal, do's and don'ts. Uses only the public patient code, never the staff code."""
         from html import escape as esc
 
@@ -2240,7 +2271,8 @@ def create_app(settings: Optional[Settings] = None,
         return (PKG_DIR / "static" / "staff-guide.html").read_text().replace(
             "{{CLINIC}}", esc(org["name"])).replace("{{URL}}", esc(intake_url(org, request))).replace(
             "{{CODE}}", esc(org["patient_code"])).replace("{{PORTAL}}", esc(public_base(request) + "/portal")).replace(
-            "{{PRIVACY}}", esc(settings.grievance_officer_email or "Settings → Your privacy rights in the app"))
+            "{{PRIVACY}}", esc(settings.grievance_officer_email or "Settings → Your privacy rights in the app")).replace(
+            "{{LANG}}", org_lang(org)).replace("{{LANGNAME}}", LANG_NAME[org_lang(org)])
 
     @app.get("/portal", response_class=HTMLResponse, include_in_schema=False)
     def portal_page() -> str:

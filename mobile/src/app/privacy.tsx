@@ -7,7 +7,9 @@ import { formatDay } from '../lib/format';
 import { useSession } from '../lib/session';
 import { usePalette } from '../lib/theme';
 import { useLoader } from '../lib/useLoader';
-import { useT } from '../lib/i18n';
+import { LANGS, useT, type Lang } from '../lib/i18n';
+
+const READ_IN: Record<Lang, string> = { en: 'Read in English', hi: 'हिंदी में पढ़ें', mr: 'मराठीत वाचा' };
 
 const CATEGORIES = ['access', 'correction', 'erasure', 'consent', 'sharing', 'security', 'other'] as const;
 type Category = (typeof CATEGORIES)[number];
@@ -17,10 +19,11 @@ export default function PrivacyScreen() {
   const { t } = useT();
   const { api } = useSession();
   const c = usePalette();
-  const [lang, setLang] = useState<'en' | 'hi'>('en');
+  const { lang: appLang } = useT();
+  const [lang, setLang] = useState<Lang>(appLang);
   const { data, error, refreshing, reload } = useLoader(async () => {
-    const [summary, en, hi] = await Promise.all([api.privacy(), api.privacyNotice('en'), api.privacyNotice('hi')]);
-    return { summary, notices: { en, hi } };
+    const [summary, ...notices] = await Promise.all([api.privacy(), ...LANGS.map((l) => api.privacyNotice(l.code))]);
+    return { summary, notices: Object.fromEntries(LANGS.map((l, i) => [l.code, notices[i]])) as Record<Lang, (typeof notices)[number]> };
   });
   const [showNotice, setShowNotice] = useState(false);
   const [nominee, setNominee] = useState<{ name: string; relationship: string; phone: string } | null>(null);
@@ -52,8 +55,9 @@ export default function PrivacyScreen() {
         <Body>{notice.summary}</Body>
         <View style={styles.row}>
           <Button title={t(showNotice ? 'Hide the full notice' : 'Read the full notice')} onPress={() => setShowNotice(!showNotice)} />
-          <Button title={lang === 'en' ? 'हिंदी में पढ़ें' : 'Read in English'}
-                  onPress={() => { setLang(lang === 'en' ? 'hi' : 'en'); setShowNotice(true); }} />
+          {LANGS.filter((l) => l.code !== lang).map((l) => (
+            <Button key={l.code} title={READ_IN[l.code]} onPress={() => { setLang(l.code); setShowNotice(true); }} />
+          ))}
         </View>
         {showNotice && notice.sections.map((sec) => (
           <View key={sec.heading} style={{ marginTop: 14, gap: 4 }}>

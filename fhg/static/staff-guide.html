@@ -1,10 +1,12 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-lang="{{LANG}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Staff Guide</title>
 <style>
+  /* The reception script in English and the clinic's language (data-lang: hi or mr). */
+  html[data-lang="hi"] [lang="mr"], html[data-lang="mr"] [lang="hi"] { display: none !important; }
   @page { size: A4; margin: 14mm; }
   body { margin: 0; background: #fff; color: #1d1d1b; font: 14px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
   .page { max-width: 760px; margin: 0 auto; padding: 24px 20px 40px; }
@@ -50,12 +52,16 @@
   <div class="script">
     <div class="say"><div class="who">English</div>
       “Before you see the doctor, could you share your family's health history? It takes two minutes on your phone:
-      scan this code, write who in your family had which illnesses, and tick to share it with us. Hindi is fine.
+      scan this code, write who in your family had which illnesses, and tick to share it with us. {{LANGNAME}} is fine.
       It's private and you can stop sharing any time.”</div>
     <div class="say" lang="hi"><div class="who">हिंदी</div>
       “डॉक्टर से मिलने से पहले, क्या आप अपने परिवार का स्वास्थ्य इतिहास बता सकते हैं? फ़ोन पर दो मिनट लगते हैं:
       यह कोड स्कैन करें, लिखें कि परिवार में किसे कौन-सी बीमारी थी, और हमारे साथ साझा करने के लिए टिक करें।
       हिंदी में लिख सकते हैं। यह निजी है और आप कभी भी साझा करना बंद कर सकते हैं।”</div>
+    <div class="say" lang="mr"><div class="who">मराठी</div>
+      “डॉक्टरांना भेटण्यापूर्वी, तुमच्या कुटुंबाचा आरोग्य इतिहास सांगाल का? फोनवर दोन मिनिटे लागतात:
+      हा कोड स्कॅन करा, कुटुंबात कोणाला कोणता आजार होता ते लिहा, आणि आमच्याशी शेअर करण्यासाठी टिक करा.
+      मराठीत लिहिले तरी चालेल. हे खाजगी आहे आणि तुम्ही कधीही शेअर करणे थांबवू शकता.”</div>
   </div>
   <ul>
     <li><b>Best moments:</b> when booking (add the link to the SMS or WhatsApp reminder), at check-in, and while waiting.</li>

@@ -433,6 +433,7 @@ class Store:
         self._add_column_if_missing("partners", "client_secret_hash", "TEXT")
         self._add_column_if_missing("partners", "catalog", "TEXT")
         self._add_column_if_missing("users", "lang", "TEXT")
+        self._add_column_if_missing("organizations", "lang", "TEXT")
 
     def _add_column_if_missing(self, table: str, column: str, decl: str) -> None:
         cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
@@ -544,6 +545,11 @@ class Store:
     def org(self, org_id: str) -> Optional[dict]:
         rows = self._query("SELECT * FROM organizations WHERE id = ?", (org_id,))
         return dict(rows[0]) if rows else None
+
+    def set_org_lang(self, org_id: str, lang: str) -> None:
+        """The second language (after English) on the clinic's poster, staff guide and intake page."""
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE organizations SET lang = ? WHERE id = ?", (lang, org_id))
 
     def org_by_code(self, kind: str, code: str) -> Optional[dict]:
         column = {"patient": "patient_code", "staff": "staff_code"}[kind]

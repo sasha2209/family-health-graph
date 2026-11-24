@@ -35,6 +35,9 @@ services:
         value: console
       - key: FHG_ENVIRONMENT
         value: production
+      # Pune pilot: read Marathi prescriptions and reports too (fhg/documents/ocr.py).
+      - key: FHG_OCR_LANGS
+        value: eng+hin+mar
       # Background jobs run inside this service (fhg/scheduler.py): hourly medicine reminders, daily test
       # reminders, a nightly encrypted backup and housekeeping. Keep exactly one instance with this on.
       - key: FHG_SCHEDULER
@@ -74,3 +77,5 @@ services:
         value: console
       - key: FHG_ENVIRONMENT
         value: staging
+      - key: FHG_OCR_LANGS
+        value: eng+hin+mar

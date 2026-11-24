@@ -28,7 +28,7 @@ def test_intake_url_public_lookup_and_pages(client, clinic):
     assert org["intake_url"] == f"https://app.example.org/c/{org['patient_code']}"
 
     assert client.get(f"/v1/public/clinics/{org['patient_code']}").json() == {
-        "name": "Riverside Family Practice", "code": org["patient_code"]}
+        "name": "Riverside Family Practice", "code": org["patient_code"], "lang": "hi"}
     assert client.get("/v1/public/clinics/NOPE-NOPE").status_code == 404
     assert client.get(f"/v1/public/clinics/{org['staff_code']}").status_code == 404   # staff code is not public
 
@@ -92,3 +92,30 @@ def test_intake_and_poster_have_hindi(client, clinic):
     assert '"hi"' in page and "मेरे क्लिनिक के साथ साझा करें" in page and 'id="lang"' in page
     poster = client.get(f"/c/{org['patient_code']}/poster").text
     assert "मुलाक़ात से पहले" in poster
+
+
+def test_clinic_language_marathi(client, clinic):
+    admin, org = clinic
+    code = org["patient_code"]
+    assert client.get(f"/v1/public/clinics/{code}").json()["lang"] == "hi"
+    assert 'data-lang="hi"' in client.get(f"/c/{code}/poster").text
+    stranger = account(client)
+    assert client.put(f"/v1/orgs/{org['id']}/language", headers=stranger, json={"lang": "mr"}).status_code == 404
+    assert client.put(f"/v1/orgs/{org['id']}/language", headers=admin, json={"lang": "xx"}).status_code == 422
+    assert client.put(f"/v1/orgs/{org['id']}/language", headers=admin, json={"lang": "mr"}).json() == {"lang": "mr"}
+    assert client.get(f"/v1/public/clinics/{code}").json()["lang"] == "mr"
+    poster = client.get(f"/c/{code}/poster").text
+    assert 'data-lang="mr"' in poster and "मराठीत लिहिले तरी चालेल" in poster and "Marathi is fine" in poster
+    guide = client.get(f"/c/{code}/staff-guide").text
+    assert 'data-lang="mr"' in guide and "Marathi is fine" in guide
+    assert "मराठी" in client.get(f"/c/{code}").text and next(
+        o for o in client.get("/v1/orgs", headers=admin).json() if o["id"] == org["id"])["lang"] == "mr"
+
+
+def test_preview_names_conditions_in_the_readers_language(client):
+    h = account(client)
+    text = "माझ्या आईला 46 व्या वर्षी स्तनाचा कर्करोग झाला."
+    r = client.post("/v1/ingest/text?preview=true&lang=mr", headers=h, json={"text": text}).json()
+    assert r["parsed"]["family"][0]["conditions"][0]["display"] == "स्तनाचा कर्करोग"
+    r = client.post("/v1/ingest/text?preview=true", headers=h, json={"text": text}).json()
+    assert "display" not in r["parsed"]["family"][0]["conditions"][0]

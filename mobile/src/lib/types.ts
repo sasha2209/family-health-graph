@@ -1,5 +1,7 @@
 // Shapes returned by the Family Health Graph API (see fhg/api.py).
 
+import type { Lang } from './translate';
+
 export type Level = 'high' | 'moderate' | 'info';
 export type ShareLevel = 'none' | 'conditions' | 'conditions_and_tree';
 export type Sex = 'female' | 'male' | 'other' | 'unknown';
@@ -339,7 +341,7 @@ export interface CareDetail extends Omit<CareSummary, 'refills_due'> {
   info: CareInfo;
   caregivers: { user_id: string; name: string | null; joined_at: string }[];
   emergency_links: { id: string; expires_at: string; views: number; created_at: string }[];
-  whatsapp: { phone: string; lang: 'en' | 'hi'; status: 'invited' | 'active' | 'stopped'; updated_at: string } | null;
+  whatsapp: { phone: string; lang: Lang; status: 'invited' | 'active' | 'stopped'; updated_at: string } | null;
 }
 
 // --- privacy rights (/v1/privacy) -----------------------------------------------------------------

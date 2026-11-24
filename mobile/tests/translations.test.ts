@@ -1,4 +1,4 @@
-// Every English UI string the app translates must have a Hindi entry. Run with: npm test
+// Every English UI string the app translates must have a Hindi and a Marathi entry. Run with: npm test
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -6,6 +6,7 @@ import { test } from 'node:test';
 
 import * as format from '../src/lib/format.ts';
 import hi from '../src/locales/hi.ts';
+import mr from '../src/locales/mr.ts';
 import { translate } from '../src/lib/translate.ts';
 
 function files(dir: string): string[] {
@@ -65,20 +66,23 @@ export function uiStrings(): Set<string> {
   return out;
 }
 
-test('every UI string has a Hindi translation', () => {
-  const missing = [...uiStrings()].filter((s) => !(s in hi) && !/^[\d\s+x·.,()–-]*$/.test(s));
-  assert.deepEqual(missing, [], `Add these to src/locales/hi.ts:\n${missing.map((s) => JSON.stringify(s)).join(',\n')}`);
-});
+for (const [code, table] of Object.entries({ hi, mr })) {
+  test(`every UI string has a translation (${code})`, () => {
+    const missing = [...uiStrings()].filter((s) => !(s in table) && !/^[\d\s+x·.,()–-]*$/.test(s));
+    assert.deepEqual(missing, [], `Add these to src/locales/${code}.ts:\n${missing.map((s) => JSON.stringify(s)).join(',\n')}`);
+  });
 
-test('placeholders survive translation', () => {
-  for (const [en, h] of Object.entries(hi)) {
-    const want = (en.match(/\{\w+\}/g) ?? []).sort().join(',');
-    const got = (h.match(/\{\w+\}/g) ?? []).sort().join(',');
-    assert.equal(got, want, `Placeholders differ for ${JSON.stringify(en)}`);
-  }
-});
+  test(`placeholders survive translation (${code})`, () => {
+    for (const [en, h] of Object.entries(table)) {
+      const want = (en.match(/\{\w+\}/g) ?? []).sort().join(',');
+      const got = (h.match(/\{\w+\}/g) ?? []).sort().join(',');
+      assert.equal(got, want, `Placeholders differ for ${JSON.stringify(en)}`);
+    }
+  });
+}
 
 test('translate fills placeholders and falls back to English', () => {
   assert.equal(translate('en', '{n} to mark', { n: 2 }), '2 to mark');
   assert.equal(translate('hi', 'A string nobody translated'), 'A string nobody translated');
+  assert.equal(translate('mr', '{n} days left', { n: 3 }), '3 दिवस उरले');
 });
