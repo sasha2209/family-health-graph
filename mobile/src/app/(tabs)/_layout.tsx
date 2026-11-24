@@ -1,6 +1,7 @@
 import { Tabs } from 'expo-router/js-tabs';
 import { ColorValue, Text } from 'react-native';
 
+import { useT } from '../../lib/i18n';
 import { usePalette } from '../../lib/theme';
 
 // Simple glyph icons keep the app free of an icon-font dependency for now.
@@ -12,6 +13,7 @@ function icon(glyph: string) {
 
 export default function TabsLayout() {
   const c = usePalette();
+  const { t } = useT();
   return (
     <Tabs
       screenOptions={{
@@ -23,10 +25,10 @@ export default function TabsLayout() {
         sceneStyle: { backgroundColor: c.bg },
       }}
     >
-      <Tabs.Screen name="index" options={{ title: 'Home', tabBarIcon: icon('♡') }} />
-      <Tabs.Screen name="family" options={{ title: 'Family', tabBarIcon: icon('⌂') }} />
-      <Tabs.Screen name="invite" options={{ title: 'Invite', tabBarIcon: icon('✉') }} />
-      <Tabs.Screen name="settings" options={{ title: 'Settings', tabBarIcon: icon('⚙') }} />
+      <Tabs.Screen name="index" options={{ title: t('Home'), tabBarIcon: icon('♡') }} />
+      <Tabs.Screen name="family" options={{ title: t('Family'), tabBarIcon: icon('⌂') }} />
+      <Tabs.Screen name="invite" options={{ title: t('Invite'), tabBarIcon: icon('✉') }} />
+      <Tabs.Screen name="settings" options={{ title: t('Settings'), tabBarIcon: icon('⚙') }} />
     </Tabs>
   );
 }

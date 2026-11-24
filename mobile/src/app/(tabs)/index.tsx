@@ -5,17 +5,18 @@ import { Text, View } from 'react-native';
 import { Badge, Check, Progress, Row, Section } from '../../components/list';
 import { Banner, Body, Button, Card, ErrorText, H2, Loading, Screen, styles } from '../../components/ui';
 import { shareDoctorSummary } from '../../lib/doctorSummary';
-import { BOOKING_LABEL, DOC_TYPE_LABEL, formatDay, REFERRAL_LABEL, VIA_LABEL } from '../../lib/format';
+import { BOOKING_LABEL, capitalize, DOC_TYPE_LABEL, formatDay, label, REFERRAL_LABEL, VIA_LABEL } from '../../lib/format';
 import { pushSupport } from '../../lib/push';
+import { N, useT } from '../../lib/i18n';
 import { useSession } from '../../lib/session';
 import { LEVEL_LABEL, usePalette } from '../../lib/theme';
 import { useLoader } from '../../lib/useLoader';
 
 const GRANDPARENT = /grand(mother|father)$/;
 
-function greeting(): string {
+function greeting(t: (s: string) => string): string {
   const h = new Date().getHours();
-  return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+  return t(h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening');
 }
 
 /**
@@ -26,6 +27,7 @@ function greeting(): string {
  */
 export default function HomeScreen() {
   const c = usePalette();
+  const { t } = useT();
   const { api } = useSession();
   const { data, error, refreshing, reload } = useLoader(async () => {
     const [report, notes, own, links, me, push, referrals, documents, myBookings, caring] = await Promise.all([
@@ -33,25 +35,25 @@ export default function HomeScreen() {
       api.referrals(), api.documents(), api.bookings(), api.care()]);
     const rels = new Set(own.family.map((m) => m.relationship));
     const steps: { title: string; detail: string; done: boolean; href: Href }[] = [
-      { title: 'Add your family’s health history', detail: 'Start with what you know. A sentence or two is fine.',
+      { title: N('Add your family’s health history'), detail: N('Start with what you know. A sentence or two is fine.'),
         done: own.family.length > 0, href: '/add-history' },
-      { title: 'Add a lab report or prescription', detail: 'Snap a photo. Real results make insights sharper.',
+      { title: N('Add a lab report or prescription'), detail: N('Snap a photo. Real results make insights sharper.'),
         done: documents.some((d) => d.status === 'saved'), href: '/add-history' },
-      { title: 'Add both parents', detail: 'Parents’ diagnoses, and their ages, matter most.',
+      { title: N('Add both parents'), detail: N('Parents’ diagnoses, and their ages, matter most.'),
         done: rels.has('mother') && rels.has('father'), href: '/add-history' },
-      { title: 'Add your grandparents', detail: 'Patterns on one side of the family change screening advice.',
+      { title: N('Add your grandparents'), detail: N('Patterns on one side of the family change screening advice.'),
         done: [...rels].some((r) => GRANDPARENT.test(r)), href: '/add-history' },
-      { title: 'Check your diabetes risk', detail: 'Two quick questions for the Indian Diabetes Risk Score.',
+      { title: N('Check your diabetes risk'), detail: N('Two quick questions for the Indian Diabetes Risk Score.'),
         done: !!own.activity && (own.observations ?? []).some((o) => o.code === 'waist_circumference'), href: '/settings' },
-      { title: 'Add your date of birth and sex', detail: 'So age- and sex-specific guidance applies.',
+      { title: N('Add your date of birth and sex'), detail: N('So age- and sex-specific guidance applies.'),
         done: !!own.birth_date && !!own.sex, href: '/settings' },
-      { title: 'Invite a relative', detail: 'Their own history makes both of your insights more accurate.',
+      { title: N('Invite a relative'), detail: N('Their own history makes both of your insights more accurate.'),
         done: links.length > 0, href: '/invite' },
-      { title: 'Protect your account', detail: 'Add your email so you can sign in on another phone.',
+      { title: N('Protect your account'), detail: N('Add your email so you can sign in on another phone.'),
         done: me.secured, href: { pathname: '/sign-in', params: { mode: 'link' } } },
     ];
     if (pushSupport().ok) {
-      steps.push({ title: 'Turn on family alerts', detail: 'Hear when a relative shares something that affects you.',
+      steps.push({ title: N('Turn on family alerts'), detail: N('Hear when a relative shares something that affects you.'),
                    done: push.registered, href: '/settings' });
     }
     const pending = documents.filter((d) => d.status === 'review');
@@ -74,13 +76,13 @@ export default function HomeScreen() {
   return (
     <Screen refreshing={refreshing} onRefresh={reload}>
       <View style={{ paddingVertical: 4 }}>
-        <Text accessibilityRole="header" style={{ fontSize: 26, fontWeight: '700', color: c.text }}>{greeting()}</Text>
+        <Text accessibilityRole="header" style={{ fontSize: 26, fontWeight: '700', color: c.text }}>{greeting(t)}</Text>
         <Body muted style={{ marginTop: 4 }}>
           {report.insights.length === 0
-            ? 'Add some family history to see what’s worth discussing with your clinician.'
+            ? t('Add some family history to see what’s worth discussing with your clinician.')
             : urgent > 0
-              ? `${urgent} ${urgent === 1 ? 'item is' : 'items are'} worth discussing with a clinician soon.`
-              : `You have ${report.insights.length} ${report.insights.length === 1 ? 'item' : 'items'} to review.`}
+              ? t(urgent === 1 ? '1 item is worth discussing with a clinician soon.' : '{n} items are worth discussing with a clinician soon.', { n: urgent })
+              : t(report.insights.length === 1 ? 'You have 1 item to review.' : 'You have {n} items to review.', { n: report.insights.length })}
         </Body>
       </View>
 
@@ -91,15 +93,15 @@ export default function HomeScreen() {
       ))}
       {notes.length > 0 && (
         <View style={{ alignSelf: 'flex-start' }}>
-          <Button title="Dismiss" onPress={async () => { await api.markNotificationsRead(); reload(); }} />
+          <Button title={t('Dismiss')} onPress={async () => { await api.markNotificationsRead(); reload(); }} />
         </View>
       )}
 
       {pending.length > 0 && (
-        <Section title="Waiting for your review" right={<Text style={{ color: c.muted }}>{pending.length}</Text>}>
+        <Section title={t('Waiting for your review')} right={<Text style={{ color: c.muted }}>{pending.length}</Text>}>
           {pending.map((d, i) => (
-            <Row key={d.id} title={DOC_TYPE_LABEL[d.doc_type]}
-                 detail={[formatDay(d.doc_date), d.source ? VIA_LABEL[d.source] : ''].filter(Boolean).join(' · ')}
+            <Row key={d.id} title={t(DOC_TYPE_LABEL[d.doc_type])}
+                 detail={[formatDay(d.doc_date), d.source && VIA_LABEL[d.source] ? t(VIA_LABEL[d.source]) : ''].filter(Boolean).join(' · ')}
                  onPress={() => router.push({ pathname: '/document/[id]', params: { id: d.id } })}
                  last={i === pending.length - 1} />
           ))}
@@ -107,15 +109,15 @@ export default function HomeScreen() {
       )}
 
       {caring.length > 0 && (
-        <Section title="Caring for">
+        <Section title={t('Caring for')}>
           {caring.map((p, i) => {
             const open = p.today.filter((d) => d.status === 'due' || d.status === 'missed').length;
             const taken = p.today.filter((d) => d.status === 'taken').length;
             return (
-              <Row key={p.care_id} title={p.name}
-                   detail={[p.today.length ? `${taken} of ${p.today.length} doses taken today` : null,
-                            open ? `${open} to mark` : null,
-                            p.refills_due ? `${p.refills_due} to reorder` : null].filter(Boolean).join(' · ') || 'Medicines and emergency details'}
+              <Row key={p.care_id} title={p.has_name ? p.name : capitalize(t(label(p.relationship_code)))}
+                   detail={[p.today.length ? t('{taken} of {total} doses taken today', { taken, total: p.today.length }) : null,
+                            open ? t('{n} to mark', { n: open }) : null,
+                            p.refills_due ? t('{n} to reorder', { n: p.refills_due }) : null].filter(Boolean).join(' · ') || t('Medicines and emergency details')}
                    onPress={() => router.push({ pathname: '/care', params: { id: p.care_id } })}
                    last={i === caring.length - 1} />
             );
@@ -124,10 +126,10 @@ export default function HomeScreen() {
       )}
 
       {activeBookings.length > 0 && (
-        <Section title="Your tests">
+        <Section title={t('Your tests')}>
           {activeBookings.map((b, i) => (
             <Row key={b.id} title={`${b.test_names.join(', ')} · ${b.partner_name}`}
-                 detail={[BOOKING_LABEL[b.status], b.scheduled_for ? formatDay(b.scheduled_for) : null].filter(Boolean).join(' · ')}
+                 detail={[t(BOOKING_LABEL[b.status]), b.scheduled_for ? formatDay(b.scheduled_for) : null].filter(Boolean).join(' · ')}
                  onPress={b.rule_id ? () => router.push({ pathname: '/insight/[id]', params: { id: b.rule_id as string } }) : undefined}
                  last={i === activeBookings.length - 1} />
           ))}
@@ -135,38 +137,38 @@ export default function HomeScreen() {
       )}
 
       {testCount > 0 && (
-        <Section title="Your results">
-          <Row title="Results over time" detail={`${testCount} test${testCount > 1 ? 's' : ''}, with healthy ranges`}
+        <Section title={t('Your results')}>
+          <Row title={t('Results over time')} detail={t(testCount > 1 ? '{n} tests, with healthy ranges' : '1 test, with healthy ranges', { n: testCount })}
                onPress={() => router.push('/results')} last />
         </Section>
       )}
 
       {todo.length > 0 && (
-        <Section title="Next steps" right={<Text style={{ color: c.muted }}>{done} of {steps.length} done</Text>}>
+        <Section title={t('Next steps')} right={<Text style={{ color: c.muted }}>{t('{done} of {total} done', { done, total: steps.length })}</Text>}>
           <View style={{ paddingHorizontal: 16, paddingBottom: 4 }}>
             <Progress value={done} total={steps.length} />
           </View>
           {/* Show the next three to keep it light; finished steps drop off. */}
           {todo.slice(0, 3).map((step, i, arr) => (
-            <Row key={step.title} title={step.title} detail={step.detail} leading={<Check done={false} />}
+            <Row key={step.title} title={t(step.title)} detail={t(step.detail)} leading={<Check done={false} />}
                  onPress={() => router.push(step.href)} last={i === arr.length - 1} />
           ))}
         </Section>
       )}
 
       {report.insights.length > 0 && (
-        <Section title="Your action items">
+        <Section title={t('Your action items')}>
           {report.insights.map((insight, i) => {
             const tone = c.level[insight.level];
             return (
               <Row
                 key={insight.rule_id}
-                title={insight.title}
+                title={t(insight.title)}
                 detail={(() => {
                   const r = referrals.find((x) => x.rule_id === insight.rule_id);
-                  return r ? `${r.org_name}: ${REFERRAL_LABEL[r.status] ?? r.status}` : insight.evidence[0] ?? insight.summary;
+                  return r ? `${r.org_name}: ${t(REFERRAL_LABEL[r.status] ?? r.status)}` : insight.evidence[0] ?? insight.summary;
                 })()}
-                eyebrow={<Badge label={LEVEL_LABEL[insight.level]} fg={tone.fg} bg={tone.bg} />}
+                eyebrow={<Badge label={t(LEVEL_LABEL[insight.level])} fg={tone.fg} bg={tone.bg} />}
                 onPress={() => router.push({ pathname: '/insight/[id]', params: { id: insight.rule_id } })}
                 last={i === report.insights.length - 1}
               />
@@ -177,20 +179,19 @@ export default function HomeScreen() {
 
       {report.insights.length > 0 && (
         <Card>
-          <H2>Share with your doctor</H2>
+          <H2>{t('Share with your doctor')}</H2>
           <Body muted>
-            A one-page summary written for clinicians: the items to discuss with the guidelines behind them,
-            a family pedigree, and your history. It’s made into a PDF on your phone for you to send or print.
+            {t('A one-page summary written for clinicians: the items to discuss with the guidelines behind them, a family pedigree, and your history. It’s made into a PDF on your phone for you to send or print.')}
           </Body>
           <View style={styles.row}>
-            <Button title="Create PDF summary" variant="primary" busy={pdfBusy} onPress={async () => {
+            <Button title={t('Create PDF summary')} variant="primary" busy={pdfBusy} onPress={async () => {
               setPdfBusy(true); setPdfError(null);
               try { await shareDoctorSummary(api); }
               catch (e) { setPdfError(e instanceof Error ? e.message : String(e)); }
               finally { setPdfBusy(false); }
             }} />
             {!summary && (
-              <Button title="Plain-language version" busy={summaryBusy} onPress={async () => {
+              <Button title={t('Plain-language version')} busy={summaryBusy} onPress={async () => {
                 setSummaryBusy(true);
                 try { setSummary((await api.summary()).text); } finally { setSummaryBusy(false); }
               }} />

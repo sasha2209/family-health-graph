@@ -378,6 +378,10 @@ class CareJoinIn(BaseModel):
     name: Optional[str] = Field(None, max_length=40, description="What the others in the circle call you")
 
 
+class LanguageIn(BaseModel):
+    lang: str = Field(pattern="^(en|hi|bn|ta|te|mr)$")
+
+
 class EmergencyLinkIn(BaseModel):
     hours: int = Field(24, ge=1, le=72)
 
@@ -717,7 +721,13 @@ def create_app(settings: Optional[Settings] = None,
     def auth_me(session: dict = Depends(current_session)) -> dict:
         identities = store.identities_for(session["user_id"])
         return {"user_id": session["user_id"], "session_id": session["id"],
-                "secured": bool(identities), "identities": identities}
+                "secured": bool(identities), "identities": identities, "lang": store.user_lang(session["user_id"])}
+
+    @app.put("/v1/profile/language")
+    def set_language(body: LanguageIn, user_id: str = Depends(current_user)) -> dict:
+        """The language for notifications and reminders (the app's own language is chosen on the phone)."""
+        store.set_user_lang(user_id, body.lang)
+        return {"lang": body.lang}
 
     @app.get("/v1/auth/sessions")
     def list_sessions(session: dict = Depends(current_session)) -> list[dict]:
@@ -2606,6 +2616,7 @@ def create_app(settings: Optional[Settings] = None,
             doses = care.doses_for_day(m, d, log)
             week.append({"day": d.isoformat(), "taken": sum(x["status"] == "taken" for x in doses), "scheduled": len(doses)})
         return {"care_id": f"{owner_id}.{member_id}", "role": role, "name": care_name(m), "relationship": m.label,
+                "relationship_code": m.relationship.value, "has_name": bool(m.name),
                 "member_id": member_id, "today": care.doses_for_day(m, today, log), "week": week,
                 "medications": meds, "info": (m.care or CareInfo()).model_dump(),
                 "caregivers": store.caregivers(owner_id, member_id) if role == "owner" else [],
@@ -2622,7 +2633,7 @@ def create_app(settings: Optional[Settings] = None,
         for owner_id, member_id in store.caring_for(user_id):
             if any(x.id == member_id for x in store.get_profile(owner_id).family):
                 out.append(care_out(owner_id, member_id, "caregiver", user_id))
-        return [{k: c[k] for k in ("care_id", "role", "name", "relationship", "today")}
+        return [{k: c[k] for k in ("care_id", "role", "name", "relationship", "relationship_code", "has_name", "today")}
                 | {"refills_due": sum(1 for med in c["medications"] if med["refill"] and med["refill"]["due"])}
                 for c in out]
 
@@ -2799,11 +2810,14 @@ def create_app(settings: Optional[Settings] = None,
             today = now.astimezone(care.IST).date()
             log = store.dose_log(owner_id, member_id, today.isoformat())
             done = {n["key"] for n in store.nudges(owner_id)}
-            for key, message in care.due_care_alerts(now, care_name(member), member, log):
+            circle = {owner_id, *(c["user_id"] for c in store.caregivers(owner_id, member_id))}
+            by_lang = {lang: dict(care.due_care_alerts(now, care_name(member), member, log, lang))
+                       for lang in {store.user_lang(uid) for uid in circle}}
+            for key in next(iter(by_lang.values())):
                 if key in done:
                     continue
-                for uid in {owner_id, *(c["user_id"] for c in store.caregivers(owner_id, member_id))}:
-                    notifier.notify(uid, "care", message, url=f"/care?id={owner_id}.{member_id}")
+                for uid in circle:
+                    notifier.notify(uid, "care", by_lang[store.user_lang(uid)][key], url=f"/care?id={owner_id}.{member_id}")
                     sent += 1
                 store.record_nudge(owner_id, key, now.isoformat())
         return {"sent": sent}

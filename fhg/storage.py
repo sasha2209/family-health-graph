@@ -411,6 +411,7 @@ class Store:
         self._add_column_if_missing("inbound_channels", "pending", "BLOB")
         self._add_column_if_missing("partners", "client_secret_hash", "TEXT")
         self._add_column_if_missing("partners", "catalog", "TEXT")
+        self._add_column_if_missing("users", "lang", "TEXT")
 
     def _add_column_if_missing(self, table: str, column: str, decl: str) -> None:
         cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
@@ -706,6 +707,15 @@ class Store:
         return [{"id": r["id"], "partner_id": r["partner_id"], "partner_name": r["partner_name"],
                  "referral_id": r["referral_id"], "created_at": r["created_at"],
                  **json.loads(self._cipher.decrypt(r["data"]))} for r in rows]
+
+    # --- language -------------------------------------------------------------------------------
+    def set_user_lang(self, user_id: str, lang: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE users SET lang = ? WHERE id = ?", (lang, user_id))
+
+    def user_lang(self, user_id: str) -> str:
+        rows = self._query("SELECT lang FROM users WHERE id = ?", (user_id,))
+        return (rows[0]["lang"] if rows else None) or "en"
 
     # --- background jobs and backups -----------------------------------------------------------
     def job_run(self, name: str) -> Optional[dict]:

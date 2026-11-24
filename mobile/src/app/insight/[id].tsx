@@ -9,18 +9,20 @@ import { BOOKING_LABEL, formatDay, REFERRAL_LABEL, rupees } from '../../lib/form
 import { useSession } from '../../lib/session';
 import { LEVEL_LABEL, usePalette } from '../../lib/theme';
 import { useLoader } from '../../lib/useLoader';
+import { N, useT } from '../../lib/i18n';
 
 /** Action items where the family tree feeds a hereditary-risk model or calculator. */
 const TREE_MODELS = new Set(['hboc_family_pattern', 'colorectal_family_history', 'lynch_criteria']);
 
 const WHEN: Record<string, string> = {
-  high: 'Worth raising with a clinician soon.',
-  moderate: 'Bring this up at your next routine visit.',
-  info: 'Good to know. No appointment needed for this alone.',
+  high: N('Worth raising with a clinician soon.'),
+  moderate: N('Bring this up at your next routine visit.'),
+  info: N('Good to know. No appointment needed for this alone.'),
 };
 
 /** Detail page for one action item: why it was flagged, what to do, and the source guidance. */
 export default function InsightDetail() {
+  const { t } = useT();
   const { id } = useLocalSearchParams<{ id: string }>();
   const c = usePalette();
   const { api } = useSession();
@@ -36,25 +38,25 @@ export default function InsightDetail() {
   const { insight, disclaimer, referrals, tests, risk } = data;
   const active = tests.bookings.filter((b) => ['requested', 'scheduled', 'sample_collected'].includes(b.status));
   if (!insight) {
-    return <Screen><Body muted>This item no longer applies. Your record may have changed.</Body></Screen>;
+    return <Screen><Body muted>{t('This item no longer applies. Your record may have changed.')}</Body></Screen>;
   }
   const tone = c.level[insight.level];
 
   return (
     <Screen>
-      <Stack.Screen options={{ title: LEVEL_LABEL[insight.level] }} />
+      <Stack.Screen options={{ title: t(LEVEL_LABEL[insight.level]) }} />
       <View style={{ gap: 8 }}>
         <View style={{ alignSelf: 'flex-start' }}>
-          <Badge label={LEVEL_LABEL[insight.level]} fg={tone.fg} bg={tone.bg} />
+          <Badge label={t(LEVEL_LABEL[insight.level])} fg={tone.fg} bg={tone.bg} />
         </View>
-        <Text accessibilityRole="header" style={{ fontSize: 22, fontWeight: '700', color: c.text }}>{insight.title}</Text>
-        <Body muted>{WHEN[insight.level]}</Body>
+        <Text accessibilityRole="header" style={{ fontSize: 22, fontWeight: '700', color: c.text }}>{t(insight.title)}</Text>
+        <Body muted>{t(WHEN[insight.level])}</Body>
       </View>
 
       <Body>{insight.summary}</Body>
 
       {insight.evidence.length > 0 && (
-        <Section title="Why this was flagged">
+        <Section title={t('Why this was flagged')}>
           {insight.evidence.map((e, i) => (
             <Row key={e} title={e} last={i === insight.evidence.length - 1} />
           ))}
@@ -62,7 +64,7 @@ export default function InsightDetail() {
       )}
 
       {referrals.length > 0 && (
-        <Section title="From your care team">
+        <Section title={t('From your care team')}>
           {referrals.map((r, i) => (
             <Row key={r.org_id} title={`${r.org_name}: ${REFERRAL_LABEL[r.status] ?? r.status}`}
                  detail={`${r.program}${r.partner_name ? ` · with ${r.partner_name}` : ''} · updated ${new Date(r.updated_at).toLocaleDateString()}`}
@@ -71,12 +73,12 @@ export default function InsightDetail() {
         </Section>
       )}
 
-      <Section title="What you can do">
+      <Section title={t('What you can do')}>
         <View style={{ padding: 16 }}><Body>{insight.recommendation}</Body></View>
       </Section>
 
       {risk && risk.assessments.length > 0 && (
-        <Section title="Your counselor's risk figures">
+        <Section title={t('Your counselor\'s risk figures')}>
           {risk.assessments.flatMap((a) => a.predictions.map((pr, i) => (
             <Row key={`${a.id}-${i}`} title={`${pr.outcome}: ${pr.probability_percent}% ${pr.horizon}`}
                  detail={[pr.population_percent != null ? `population ${pr.population_percent}%` : null,
@@ -87,18 +89,17 @@ export default function InsightDetail() {
       )}
 
       {risk && TREE_MODELS.has(insight.rule_id) && (
-        <Section title="For your genetic counselor">
+        <Section title={t('For your genetic counselor')}>
           <View style={{ padding: 16, gap: 8 }}>
             <Body>
-              Counselors calculate breast and ovarian cancer risk with BOADICEA in CanRisk. Your family tree can be
-              exported as a CanRisk file, with no names in it.
+              {t('Counselors calculate breast and ovarian cancer risk with BOADICEA in CanRisk. Your family tree can be exported as a CanRisk file, with no names in it.')}
             </Body>
             {risk.needs ? <Body muted>{risk.needs}</Body> : (
               <Pressable accessibilityRole="button" onPress={() => {
                 setShareError(null);
                 shareCanRiskFile(api).catch((e) => setShareError(e instanceof Error ? e.message : String(e)));
               }}>
-                <Text style={{ color: c.accent, fontSize: 16, fontWeight: '600' }}>Share the CanRisk file</Text>
+                <Text style={{ color: c.accent, fontSize: 16, fontWeight: '600' }}>{t('Share the CanRisk file')}</Text>
               </Pressable>
             )}
             {risk.pedigree && risk.pedigree.not_placed.length > 0 && (
@@ -110,7 +111,7 @@ export default function InsightDetail() {
       )}
 
       {tests.bookings.length > 0 && (
-        <Section title="Your bookings">
+        <Section title={t('Your bookings')}>
           {tests.bookings.map((b, i) => (
             <View key={b.id}>
               <Row title={`${b.test_names.join(', ')} · ${b.partner_name}`}
@@ -119,10 +120,10 @@ export default function InsightDetail() {
               {active.includes(b) && (
                 <View style={{ flexDirection: 'row', gap: 16, paddingHorizontal: 16, paddingBottom: 12 }}>
                   <Pressable accessibilityRole="button" onPress={async () => { await api.cancelBooking(b.id); reload(); }}>
-                    <Text style={{ color: c.danger, fontSize: 14 }}>Cancel booking</Text>
+                    <Text style={{ color: c.danger, fontSize: 14 }}>{t('Cancel booking')}</Text>
                   </Pressable>
                   <Pressable accessibilityRole="button" onPress={async () => { await api.bookingDoneElsewhere(b.id); reload(); }}>
-                    <Text style={{ color: c.accent, fontSize: 14 }}>I had it done elsewhere</Text>
+                    <Text style={{ color: c.accent, fontSize: 14 }}>{t('I had it done elsewhere')}</Text>
                   </Pressable>
                 </View>
               )}
@@ -132,25 +133,25 @@ export default function InsightDetail() {
       )}
 
       {tests.tests.length > 0 && active.length === 0 && (
-        <Section title="Get tested">
-          {tests.tests.map((t) => (
-            <View key={t.test}>
+        <Section title={t('Get tested')}>
+          {tests.tests.map((test) => (
+            <View key={test.test}>
               <View style={{ paddingHorizontal: 16, paddingTop: 14, gap: 2 }}>
-                <Text style={{ color: c.text, fontSize: 16, fontWeight: '600' }}>{t.name}</Text>
-                <Body muted style={{ fontSize: 13 }}>{t.prep}</Body>
+                <Text style={{ color: c.text, fontSize: 16, fontWeight: '600' }}>{test.name}</Text>
+                <Body muted style={{ fontSize: 13 }}>{test.prep}</Body>
               </View>
-              {t.offers.length === 0 ? (
+              {test.offers.length === 0 ? (
                 <View style={{ paddingHorizontal: 16, paddingVertical: 10 }}>
-                  <Body muted style={{ fontSize: 13 }}>No partner offers this yet. Your doctor or any lab can do it.</Body>
+                  <Body muted style={{ fontSize: 13 }}>{t('No partner offers this yet. Your doctor or any lab can do it.')}</Body>
                 </View>
-              ) : t.offers.map((o) => (
+              ) : test.offers.map((o) => (
                 <Row key={o.partner_id} title={o.partner_name}
-                     detail={[rupees(o.price_inr), o.home_collection ? 'home collection' : null,
-                              o.turnaround_days != null ? `results in ${o.turnaround_days} day${o.turnaround_days === 1 ? '' : 's'}` : null]
+                     detail={[rupees(o.price_inr), o.home_collection ? t('home collection') : null,
+                              o.turnaround_days != null ? t(o.turnaround_days === 1 ? 'results in 1 day' : 'results in {n} days', { n: o.turnaround_days }) : null]
                        .filter(Boolean).join(' · ')}
                      onPress={() => router.push({ pathname: '/book', params: {
-                       rule: insight.rule_id, partner: o.partner_id, partnerName: o.partner_name, tests: t.test,
-                       testName: t.name, price: o.price_inr != null ? String(o.price_inr) : '' } })} />
+                       rule: insight.rule_id, partner: o.partner_id, partnerName: o.partner_name, tests: test.test,
+                       testName: test.name, price: o.price_inr != null ? String(o.price_inr) : '' } })} />
               ))}
             </View>
           ))}
@@ -158,7 +159,7 @@ export default function InsightDetail() {
       )}
 
       {insight.references.length > 0 && (
-        <Section title="Based on">
+        <Section title={t('Based on')}>
           {insight.references.map((r, i) => (
             <Row key={r.url} title={r.title} onPress={() => Linking.openURL(r.url)}
                  last={i === insight.references.length - 1} />

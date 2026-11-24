@@ -5,6 +5,7 @@ import { AppState, Platform, StyleSheet, Text, View } from 'react-native';
 
 import { Button } from '../components/ui';
 import { usePalette } from './theme';
+import { useT } from './i18n';
 
 const PREF_KEY = 'fhg_app_lock';
 const LOCK_AFTER_MS = 30_000; // re-lock after 30 s in the background
@@ -21,10 +22,10 @@ const AppLockContext = createContext<AppLock>({ available: false, enabled: false
 
 export const useAppLock = () => useContext(AppLockContext);
 
-async function authenticate(): Promise<boolean> {
+async function authenticate(t: (s: string) => string): Promise<boolean> {
   const result = await LocalAuthentication.authenticateAsync({
-    promptMessage: 'Unlock Family Health Graph',
-    cancelLabel: 'Cancel',
+    promptMessage: t('Unlock Family Health Graph'),
+    cancelLabel: t('Cancel'),
   }); // falls back to the device passcode if biometrics fail
   return result.success;
 }
@@ -35,6 +36,7 @@ async function authenticate(): Promise<boolean> {
  * app switcher. `active` should be true only while someone is signed in.
  */
 export function AppLockProvider({ children, active }: { children: ReactNode; active: boolean }) {
+  const { t } = useT();
   const c = usePalette();
   const [available, setAvailable] = useState(false);
   const [enabled, setEnabledState] = useState(false);
@@ -45,8 +47,8 @@ export function AppLockProvider({ children, active }: { children: ReactNode; act
   useEffect(() => { activeRef.current = active; });
 
   const unlock = useCallback(async () => {
-    if (await authenticate().catch(() => false)) setLocked(false);
-  }, []);
+    if (await authenticate(t).catch(() => false)) setLocked(false);
+  }, [t]);
 
   // Lock, and prompt right away if someone is signed in.
   const lockNow = useCallback(() => {
@@ -80,11 +82,11 @@ export function AppLockProvider({ children, active }: { children: ReactNode; act
   }, [enabled, lockNow]);
 
   const setEnabled = useCallback(async (on: boolean) => {
-    if (on && !(await authenticate().catch(() => false))) return false; // prove it works first
+    if (on && !(await authenticate(t).catch(() => false))) return false; // prove it works first
     await SecureStore.setItemAsync(PREF_KEY, on ? '1' : '0');
     setEnabledState(on);
     return true;
-  }, []);
+  }, [t]);
 
   const hideContent = active && native && (!foreground || (enabled && locked));
 
@@ -94,11 +96,11 @@ export function AppLockProvider({ children, active }: { children: ReactNode; act
       {hideContent && (
         <View style={[StyleSheet.absoluteFill, s.cover, { backgroundColor: c.bg }]}
               accessibilityViewIsModal>
-          <Text style={[s.title, { color: c.text }]}>Family Health Graph</Text>
+          <Text style={[s.title, { color: c.text }]}>{t('Family Health Graph')}</Text>
           {locked && foreground && (
             <>
-              <Text style={{ color: c.muted, marginBottom: 16 }}>Locked to protect your health information.</Text>
-              <Button title="Unlock" variant="primary" onPress={unlock} />
+              <Text style={{ color: c.muted, marginBottom: 16 }}>{t('Locked to protect your health information.')}</Text>
+              <Button title={t('Unlock')} variant="primary" onPress={unlock} />
             </>
           )}
         </View>

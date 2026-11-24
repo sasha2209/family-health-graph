@@ -5,10 +5,11 @@ import { useSession } from '../lib/session';
 import { usePalette } from '../lib/theme';
 import { useLoader } from '../lib/useLoader';
 import { Body, Button, Card, ErrorText, H2, styles } from './ui';
+import { useT } from '../lib/i18n';
 
-async function copyOrShare(text: string): Promise<string | null> {
+async function copyOrShare(text: string, t: (s: string) => string): Promise<string | null> {
   if (Platform.OS === 'web') {
-    try { await navigator.clipboard.writeText(text); return 'Copied'; } catch { return 'Select the address to copy it'; }
+    try { await navigator.clipboard.writeText(text); return t('Copied'); } catch { return t('Select the address to copy it'); }
   }
   await Share.share({ message: text });
   return null;
@@ -16,6 +17,7 @@ async function copyOrShare(text: string): Promise<string | null> {
 
 /** Forward lab reports and prescriptions by email or WhatsApp instead of uploading them one by one. */
 export function ForwardCard() {
+  const { t } = useT();
   const { api } = useSession();
   const c = usePalette();
   const { data, error, reload } = useLoader(() => api.inbound());
@@ -34,36 +36,36 @@ export function ForwardCard() {
 
   return (
     <Card>
-      <H2>Forward reports instead</H2>
-      <Body muted>Labs and doctors already send reports by email and WhatsApp. Forward them here and they wait for you to check.</Body>
+      <H2>{t('Forward reports instead')}</H2>
+      <Body muted>{t('Labs and doctors already send reports by email and WhatsApp. Forward them here and they wait for you to check.')}</Body>
 
       {data.email.available && data.email.address && (
         <View style={{ marginTop: 14, gap: 6 }}>
-          <Text style={[styles.label, { color: c.muted }]}>Your private email address</Text>
-          <Text selectable accessibilityLabel={`Forwarding address ${data.email.address}`}
+          <Text style={[styles.label, { color: c.muted }]}>{t('Your private email address')}</Text>
+          <Text selectable accessibilityLabel={t('Forwarding address {address}', { address: data.email.address ?? '' })}
                 style={{ color: c.text, fontSize: 15, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
             {data.email.address}
           </Text>
           <View style={styles.row}>
-            <Button title={Platform.OS === 'web' ? 'Copy address' : 'Share address'}
-                    onPress={async () => setNote(await copyOrShare(data.email.address!))} />
-            <Button title="Get a new address" disabled={busy} onPress={() => run(async () => {
-              await api.rotateInboundEmail(); setNote('New address ready. The old one no longer works.'); reload();
+            <Button title={t(Platform.OS === 'web' ? 'Copy address' : 'Share address')}
+                    onPress={async () => setNote(await copyOrShare(data.email.address!, t))} />
+            <Button title={t('Get a new address')} disabled={busy} onPress={() => run(async () => {
+              await api.rotateInboundEmail(); setNote(t('New address ready. The old one no longer works.')); reload();
             })} />
           </View>
-          <Body muted style={{ fontSize: 12 }}>Anyone with this address can send you documents, so share it only with your labs and doctors.</Body>
+          <Body muted style={{ fontSize: 12 }}>{t('Anyone with this address can send you documents, so share it only with your labs and doctors.')}</Body>
         </View>
       )}
 
       {data.whatsapp.available && (
         <View style={{ marginTop: 16, gap: 6 }}>
-          <Text style={[styles.label, { color: c.muted }]}>WhatsApp</Text>
+          <Text style={[styles.label, { color: c.muted }]}>{t('WhatsApp')}</Text>
           {data.whatsapp.linked ? (
             <>
               <Body>Connected. Send photos or PDFs to {data.whatsapp.number}, or type family history in English, Hindi or
                 Hinglish (“mummy ko sugar hai”). Reply 1 to save, HELP for options.</Body>
               <View style={styles.row}>
-                <Button title="Disconnect WhatsApp" variant="danger" disabled={busy}
+                <Button title={t('Disconnect WhatsApp')} variant="danger" disabled={busy}
                         onPress={() => run(async () => { await api.unlinkWhatsapp(); reload(); })} />
               </View>
             </>
@@ -72,14 +74,14 @@ export function ForwardCard() {
               <Body>Send this message from your WhatsApp to {code.number} within {code.minutes} minutes:</Body>
               <Text selectable style={{ color: c.text, fontSize: 22, fontWeight: '700', letterSpacing: 1 }}>{code.message}</Text>
               <View style={styles.row}>
-                <Button title="Open WhatsApp" variant="primary"
+                <Button title={t('Open WhatsApp')} variant="primary"
                         onPress={() => Linking.openURL(`https://wa.me/${waDigits}?text=${encodeURIComponent(code.message)}`)} />
-                <Button title="I’ve sent it" onPress={() => { setCode(null); reload(); }} />
+                <Button title={t('I’ve sent it')} onPress={() => { setCode(null); reload(); }} />
               </View>
             </>
           ) : (
             <View style={styles.row}>
-              <Button title="Connect WhatsApp" variant="primary" disabled={busy} onPress={() => run(async () => {
+              <Button title={t('Connect WhatsApp')} variant="primary" disabled={busy} onPress={() => run(async () => {
                 const r = await api.whatsappCode();
                 setCode({ message: r.message, number: r.number, minutes: r.expires_in_minutes });
               })} />

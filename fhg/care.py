@@ -142,12 +142,30 @@ def doses_for_day(member: FamilyMember, day: date, log: list[dict], now: Optiona
     return sorted(out, key=lambda d: (SLOTS.index(d["slot"]), d["name"].lower()))
 
 
-def due_care_alerts(now: datetime, who: str, member: FamilyMember, log: list[dict]) -> list[tuple[str, str]]:
+ALERT_TEXT = {
+    "en": {"dose": "Time for {who}'s {slot} medicines: {names}.",
+           "missed": "{who}'s {slot} medicines haven't been marked as taken: {names}.",
+           "refill_today": "{who}'s {med} runs out today. Time to reorder.",
+           "refill_1": "{who}'s {med} has 1 day left. Time to reorder.",
+           "refill_n": "{who}'s {med} has {n} days left. Time to reorder.",
+           "morning": "morning", "afternoon": "afternoon", "night": "night"},
+    "hi": {"dose": "{who} की {slot} की दवाइयों का समय: {names}।",
+           "missed": "{who} की {slot} की दवाइयाँ अभी तक ली गई दर्ज नहीं हुईं: {names}।",
+           "refill_today": "{who} की {med} आज ख़त्म हो जाएगी। फिर से मँगाने का समय है।",
+           "refill_1": "{who} की {med} 1 दिन की बची है। फिर से मँगाने का समय है।",
+           "refill_n": "{who} की {med} {n} दिन की बची है। फिर से मँगाने का समय है।",
+           "morning": "सुबह", "afternoon": "दोपहर", "night": "रात"},
+}
+
+
+def due_care_alerts(now: datetime, who: str, member: FamilyMember, log: list[dict],
+                    lang: str = "en") -> list[tuple[str, str]]:
     """[(dedupe key, message)] for one person being cared for, at ``now``. Run hourly.
 
     * the slot's reminder, in the slot's hour;
     * a missed-dose notice MISSED_AFTER_HOURS later if nobody marked it;
     * a refill alert once a day (at the morning slot) while REFILL_DAYS or fewer are left."""
+    tx = ALERT_TEXT.get(lang, ALERT_TEXT["en"])
     now = now.astimezone(IST)
     today = now.date()
     out = []
@@ -158,14 +176,13 @@ def due_care_alerts(now: datetime, who: str, member: FamilyMember, log: list[dic
             continue
         names = ", ".join(sorted({d["name"] for d in in_slot}))
         if now.hour == SLOT_HOUR[slot] and any(d["status"] == "due" for d in in_slot):
-            out.append((f"dose:{member.id}:{today}:{slot}", f"Time for {who}'s {slot} medicines: {names}."))
+            out.append((f"dose:{member.id}:{today}:{slot}", tx["dose"].format(who=who, slot=tx[slot], names=names)))
         if now.hour == SLOT_HOUR[slot] + MISSED_AFTER_HOURS and any(d["status"] == "missed" for d in in_slot):
-            out.append((f"missed:{member.id}:{today}:{slot}",
-                        f"{who}'s {slot} medicines haven't been marked as taken: {names}."))
+            out.append((f"missed:{member.id}:{today}:{slot}", tx["missed"].format(who=who, slot=tx[slot], names=names)))
     if now.hour == SLOT_HOUR["morning"]:
         for med in member.medications:
             r = refill(med, today) if med.reminders else None
             if r and r["due"]:
-                left = "runs out today" if r["days_left"] == 0 else f"has {r['days_left']} day{'s' * (r['days_left'] != 1)} left"
-                out.append((f"refill:{med.id}:{today}", f"{who}'s {med.name} {left}. Time to reorder."))
+                key = "refill_today" if r["days_left"] == 0 else "refill_1" if r["days_left"] == 1 else "refill_n"
+                out.append((f"refill:{med.id}:{today}", tx[key].format(who=who, med=med.name, n=r["days_left"])))
     return out

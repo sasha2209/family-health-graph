@@ -2,13 +2,15 @@ import { useState } from 'react';
 import { Share, View } from 'react-native';
 
 import { Body, Button, Card, Chips, ErrorText, Field, H2, Screen, styles } from '../../components/ui';
-import { INVITE_RELATIONSHIPS, label, SHARE_OPTIONS } from '../../lib/format';
+import { capitalize, INVITE_RELATIONSHIPS, label, SHARE_OPTIONS } from '../../lib/format';
+import { useT } from '../../lib/i18n';
 import { enablePush, pushSupport } from '../../lib/push';
 import { useSession } from '../../lib/session';
 import type { CreatedInvite, ShareLevel } from '../../lib/types';
 
 export default function InviteScreen() {
   const { api } = useSession();
+  const { t } = useT();
   const [relationship, setRelationship] = useState('mother');
   const [name, setName] = useState('');
   const [message, setMessage] = useState('');
@@ -23,7 +25,7 @@ export default function InviteScreen() {
     try {
       await Share.share({
         title: 'Family Health Graph',
-        message: `I'm putting together our family health history. Can you add yours? ${invite.invite_url}`,
+        message: t("I'm putting together our family health history. Can you add yours? {url}", { url: invite.invite_url }),
         url: invite.invite_url,
       });
     } catch {
@@ -53,41 +55,41 @@ export default function InviteScreen() {
   return (
     <Screen>
       <Body muted>
-        Relatives who join can share their own history, so both of your insights get more accurate.
-        Each of you decides what you share, and can change it at any time.
+        {t('Relatives who join can share their own history, so both of your insights get more accurate. Each of you decides what you share, and can change it at any time.')}
       </Body>
       <Card>
-        <Chips label="They are your" options={INVITE_RELATIONSHIPS} value={relationship}
+        <Chips label={t('They are your')} options={INVITE_RELATIONSHIPS} value={relationship}
+               format={(r) => capitalize(t(label(r)))}
                onChange={(v) => { setRelationship(v); setCreated(null); }} />
-        <Field label="Your first name (shown to them)" value={name} onChangeText={setName}
-               maxLength={60} placeholder="e.g. Priya" />
-        <Field label="Message (optional)" value={message} onChangeText={setMessage} maxLength={500}
-               placeholder="Can you add what you know about your side?" />
-        <Chips<ShareLevel> label="You'll share with them"
-               options={SHARE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+        <Field label={t('Your first name (shown to them)')} value={name} onChangeText={setName}
+               maxLength={60} placeholder={t('e.g. Priya')} />
+        <Field label={t('Message (optional)')} value={message} onChangeText={setMessage} maxLength={500}
+               placeholder={t('Can you add what you know about your side?')} />
+        <Chips<ShareLevel> label={t("You'll share with them")}
+               options={SHARE_OPTIONS.map((o) => ({ value: o.value, label: t(o.label) }))}
                value={share} onChange={setShare} />
         <View style={styles.row}>
-          <Button title="Create and share invite" variant="primary" onPress={create} busy={busy} />
+          <Button title={t('Create and share invite')} variant="primary" onPress={create} busy={busy} />
         </View>
         <ErrorText>{error}</ErrorText>
       </Card>
 
       {created && (
         <Card>
-          <H2>Invite ready</H2>
+          <H2>{t('Invite ready')}</H2>
           <Body selectable>{created.invite_url}</Body>
           <Body muted style={{ marginTop: 6 }}>
-            Send this to your {label(relationship)}. It works once and expires in 14 days.
+            {t('Send this to your {who}. It works once and expires in 14 days.', { who: t(label(relationship)) })}
           </Body>
           <View style={styles.row}>
-            <Button title="Share again" onPress={() => shareLink(created)} />
+            <Button title={t('Share again')} onPress={() => shareLink(created)} />
             {pushSupport().ok && !alertsOn && (
-              <Button title="Notify me when they join" onPress={async () => {
+              <Button title={t('Notify me when they join')} onPress={async () => {
                 setAlertsOn(await enablePush(api).catch(() => false));
               }} />
             )}
           </View>
-          {alertsOn && <Body muted style={{ marginTop: 6 }}>We’ll let you know when they join.</Body>}
+          {alertsOn && <Body muted style={{ marginTop: 6 }}>{t('We’ll let you know when they join.')}</Body>}
         </Card>
       )}
     </Screen>
