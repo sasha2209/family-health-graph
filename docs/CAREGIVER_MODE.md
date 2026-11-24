@@ -38,7 +38,7 @@ In the app: **Home → Caring for**, a relative's page → **Caregiver mode**, a
 For a parent who doesn't use the app, a caregiver can send the reminders to the parent's own WhatsApp (care screen →
 *Reminders on their WhatsApp*):
 
-1. **Set up.** The caregiver enters the number and the language (Hindi or English), and confirms the parent agreed.
+1. **Set up.** The caregiver enters the number and the language (Hindi, Marathi or English), and confirms the parent agreed.
    `PUT /v1/care/{id}/whatsapp` sends the **invitation template**.
 2. **Opt in.** Nothing more is sent until the parent replies **YES** (or हाँ / haan).
 3. **Reminders.** At each dose time the hourly job sends the **reminder template**, once per slot, naming the
@@ -62,8 +62,10 @@ Template names are configurable: `FHG_WA_TEMPLATE_CARE_OPTIN` and `FHG_WA_TEMPLA
 | `care_optin` | Hindi (`hi`) | आपके परिवार ने Family Health Graph में आपके लिए दवा के रिमाइंडर सेट किए हैं। इन्हें यहाँ पाने के लिए YES भेजें, या मना करने के लिए STOP भेजें। |
 | `medicine_reminder` | English (`en`) | Time for your {{1}} medicines: {{2}}. Reply 1 when you've taken them. |
 | `medicine_reminder` | Hindi (`hi`) | आपकी {{1}} की दवाइयों का समय: {{2}}। दवा लेने के बाद 1 भेजें। |
+| `care_optin` | Marathi (`mr`) | तुमच्या कुटुंबाने Family Health Graph मध्ये तुमच्यासाठी औषधांच्या आठवणी सेट केल्या आहेत. त्या इथे मिळवण्यासाठी YES (होय) पाठवा, किंवा नको असल्यास STOP पाठवा. |
+| `medicine_reminder` | Marathi (`mr`) | तुमच्या औषधांची वेळ ({{1}}): {{2}}. औषध घेतल्यावर 1 पाठवा. |
 
-`{{1}}` is the time of day (morning or सुबह) and `{{2}}` the medicine names. Replies within 24 hours of the parent's
+`{{1}}` is the time of day (morning, सुबह or सकाळ) and `{{2}}` the medicine names. Replies within 24 hours of the parent's
 last message are free text (`fhg/care.py`, `WA_TEXT`).
 
 ## To go live

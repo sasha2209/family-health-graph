@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-lang="{{LANG}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -17,6 +17,8 @@
   .steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; text-align: left; margin-top: 28px; }
   .steps div { border: 1px solid #e3e2dc; border-radius: 10px; padding: 12px; font-size: 14px; }
   .steps b { display: block; color: #2f6f62; margin-bottom: 4px; }
+  /* English plus the clinic's language (data-lang on <html>: hi or mr). */
+  html[data-lang="hi"] [lang="mr"], html[data-lang="mr"] [lang="hi"] { display: none !important; }
   .hi { display: block; font-size: .82em; color: #555; margin-top: 2px; }
   h1 .hi { font-size: .62em; color: #2f6f62; margin-top: 6px; }
   .foot { margin-top: 26px; font-size: 12px; color: #666; }
@@ -28,17 +30,17 @@
 <body>
 <div class="page">
   <div class="clinic">{{CLINIC}}</div>
-  <h1>Before your visit, share your family health history<span class="hi" lang="hi">मुलाक़ात से पहले, अपने परिवार का स्वास्थ्य इतिहास साझा करें</span></h1>
-  <p class="lede">Your family's health can change which screenings are right for you. It takes about two minutes, no app needed.<span class="hi" lang="hi">परिवार के स्वास्थ्य से तय हो सकता है कि आपके लिए कौन-सी जाँच ज़रूरी है। लगभग दो मिनट लगते हैं, ऐप की ज़रूरत नहीं।</span></p>
+  <h1>Before your visit, share your family health history<span class="hi" lang="hi">मुलाक़ात से पहले, अपने परिवार का स्वास्थ्य इतिहास साझा करें</span><span class="hi" lang="mr">भेटीपूर्वी, तुमच्या कुटुंबाचा आरोग्य इतिहास शेअर करा</span></h1>
+  <p class="lede">Your family's health can change which screenings are right for you. It takes about two minutes, no app needed.<span class="hi" lang="hi">परिवार के स्वास्थ्य से तय हो सकता है कि आपके लिए कौन-सी जाँच ज़रूरी है। लगभग दो मिनट लगते हैं, ऐप की ज़रूरत नहीं।</span><span class="hi" lang="mr">तुमच्यासाठी कोणत्या तपासण्या योग्य आहेत हे कुटुंबाच्या आरोग्यावरून बदलू शकते. साधारण दोन मिनिटे लागतात, अ‍ॅपची गरज नाही.</span></p>
   <img class="qr" src="qr.svg" alt="QR code linking to {{URL}}">
   <div class="url">{{URL}}</div>
-  <div class="code">or enter clinic code <b>{{CODE}}</b> in the Family Health Graph app<span class="hi" lang="hi">या Family Health Graph ऐप में क्लिनिक कोड <b>{{CODE}}</b> डालें</span></div>
+  <div class="code">or enter clinic code <b>{{CODE}}</b> in the Family Health Graph app<span class="hi" lang="hi">या Family Health Graph ऐप में क्लिनिक कोड <b>{{CODE}}</b> डालें</span><span class="hi" lang="mr">किंवा Family Health Graph अ‍ॅपमध्ये क्लिनिक कोड <b>{{CODE}}</b> टाका</span></div>
   <div class="steps">
-    <div><b>1. Scan · स्कैन करें</b>Point your phone's camera at the code.<span class="hi" lang="hi">फ़ोन का कैमरा कोड पर रखें।</span></div>
-    <div><b>2. Tell us · बताएँ</b>Who in your family had which conditions, in your own words. Hindi is fine.<span class="hi" lang="hi">अपने शब्दों में बताएँ कि परिवार में किसे कौन-सी बीमारी थी। हिंदी में लिख सकते हैं।</span></div>
-    <div><b>3. Share · साझा करें</b>Your care team sees what may need follow-up, such as earlier screening.<span class="hi" lang="hi">आपकी देखभाल टीम देखती है कि किस पर ध्यान देना है, जैसे जल्दी जाँच।</span></div>
+    <div><b>1. Scan<span lang="hi"> · स्कैन करें</span><span lang="mr"> · स्कॅन करा</span></b>Point your phone's camera at the code.<span class="hi" lang="hi">फ़ोन का कैमरा कोड पर रखें।</span><span class="hi" lang="mr">फोनचा कॅमेरा कोडवर धरा.</span></div>
+    <div><b>2. Tell us<span lang="hi"> · बताएँ</span><span lang="mr"> · सांगा</span></b>Who in your family had which conditions, in your own words. {{LANGNAME}} is fine.<span class="hi" lang="hi">अपने शब्दों में बताएँ कि परिवार में किसे कौन-सी बीमारी थी। हिंदी में लिख सकते हैं।</span><span class="hi" lang="mr">कुटुंबात कोणाला कोणता आजार होता, ते तुमच्या शब्दांत सांगा. मराठीत लिहिले तरी चालेल.</span></div>
+    <div><b>3. Share<span lang="hi"> · साझा करें</span><span lang="mr"> · शेअर करा</span></b>Your care team sees what may need follow-up, such as earlier screening.<span class="hi" lang="hi">आपकी देखभाल टीम देखती है कि किस पर ध्यान देना है, जैसे जल्दी जाँच।</span><span class="hi" lang="mr">कशाकडे पुढे लक्ष द्यायचे, जसे लवकर तपासणी, हे तुमच्या काळजी टीमला दिसते.</span></div>
   </div>
-  <p class="foot">Encrypted, never sold, never shared with insurers or employers. You can disconnect at any time. Not a diagnosis.<span class="hi" lang="hi">एन्क्रिप्टेड, कभी बेचा नहीं जाता, बीमा कंपनियों या नियोक्ताओं को कभी नहीं दिया जाता। आप कभी भी अलग हो सकते हैं। यह निदान नहीं है।</span></p>
+  <p class="foot">Encrypted, never sold, never shared with insurers or employers. You can disconnect at any time. Not a diagnosis.<span class="hi" lang="hi">एन्क्रिप्टेड, कभी बेचा नहीं जाता, बीमा कंपनियों या नियोक्ताओं को कभी नहीं दिया जाता। आप कभी भी अलग हो सकते हैं। यह निदान नहीं है।</span><span class="hi" lang="mr">एन्क्रिप्टेड, कधीही विकले जात नाही, विमा कंपन्या किंवा नियोक्त्यांना कधीही दिले जात नाही. तुम्ही कधीही जोडणी काढू शकता. हे निदान नाही.</span></p>
   <button class="print" onclick="window.print()">Print this poster</button>
 </div>
 </body>

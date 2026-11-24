@@ -16,7 +16,7 @@ FROM python:3.13-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 WORKDIR /srv
 # OCR for uploaded prescriptions and lab reports (read on this server; no AI needed for most documents).
-RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-hin poppler-utils \
+RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-hin tesseract-ocr-mar poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 RUN pip install -r requirements.txt

@@ -115,6 +115,8 @@
           <p class="muted" style="margin-top:0">Add this link to appointment reminders (text or email), or print the poster for your waiting room. Patients share their family history in about two minutes, with no app needed.</p>
           <div class="intake-url" id="intake-url"></div>
           <div class="row" style="margin-top:8px"><button id="copy-link">Copy link</button><a id="poster" target="_blank" rel="noopener"><button tabindex="-1">Print poster</button></a><a id="staff-guide" target="_blank" rel="noopener"><button tabindex="-1">Staff guide</button></a></div>
+          <div id="lang-box" class="row hidden" style="margin-top:10px"><label for="org-lang" class="muted">Patients' language, next to English</label>
+            <select id="org-lang"><option value="hi">Hindi · हिन्दी</option><option value="mr">Marathi · मराठी</option></select></div>
           <img id="intake-qr" alt="QR code for the intake link" width="150" height="150" style="margin-top:12px; background:#fff; border-radius:8px; padding:6px">
           <p class="muted" style="margin:12px 0 6px">Patients who already have the app can enter the clinic code instead:</p>
           <span class="code" id="patient-code"></span>
@@ -179,6 +181,7 @@ async function loadOrg() {
   $("poster").href = `/c/${encodeURIComponent(org.patient_code)}/poster`;
   $("staff-guide").href = `/c/${encodeURIComponent(org.patient_code)}/staff-guide`;
   show("staff-box", !!org.staff_code); $("staff-code-out").textContent = org.staff_code || "";
+  show("lang-box", org.role === "admin"); $("org-lang").value = org.lang || "hi";
   $("tiles").innerHTML = [
     [im.patients_connected, "Patients connected"],
     [im.patients_with_high_priority, "Worth discussing soon"],
@@ -283,6 +286,13 @@ $("filter").onchange = renderRows;
 $("copy-link").onclick = async () => {
   try { await navigator.clipboard.writeText(data.org.intake_url); status("Intake link copied."); }
   catch (e) { status("Copy failed. Select the link and copy it manually."); }
+};
+$("org-lang").onchange = async (e) => {
+  try {
+    await api(`/v1/orgs/${orgId}/language`, { method: "PUT", body: JSON.stringify({ lang: e.target.value }) });
+    data.org.lang = e.target.value;
+    status(`Poster, staff guide and intake page now use ${e.target.value === "mr" ? "Marathi" : "Hindi"} next to English.`);
+  } catch (err) { status("Error: " + err.message); e.target.value = data.org.lang || "hi"; }
 };
 // Pilot report: the impact numbers a clinic shares with leadership and funders. No patient names.
 $("export").onclick = () => {

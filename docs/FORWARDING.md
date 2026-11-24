@@ -37,7 +37,7 @@ Once a number is linked, the assistant understands:
 
 | They send | It does |
 |---|---|
-| A photo or PDF | Reads it (on-server OCR in English and Hindi, rules, opt-in AI). Then it replies **1** = save to my record, **2** = my mother's, **3** = my father's. |
+| A photo or PDF | Reads it (on-server OCR in English, Hindi and Marathi, rules, opt-in AI). Then it replies **1** = save to my record, **2** = my mother's, **3** = my father's. |
 | Family history as text, in English, **Hindi or Hinglish** (“mummy ko sugar hai, papa ko 52 mein heart attack hua”) | Kinship words (nani, dadi, chacha, mausi, bua…), condition words (sugar, BP, dil ka daura, lakwa…) and ages are understood. It asks for **1** to save. |
 | `HELP` · `SUMMARY` · `LANG hi/bn/ta/te/mr/en` · `STOP` | Options · action items · reply language · disconnect |
 | A voice note | Asks for text or a photo (voice is planned) |

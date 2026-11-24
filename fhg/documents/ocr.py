@@ -60,7 +60,8 @@ def tesseract_available() -> bool:
 @lru_cache(maxsize=1)
 def ocr_languages() -> str:
     """English plus the Indian scripts that are installed, limited by FHG_OCR_LANGS (default eng+hin).
-    Each extra language slows OCR, so add others (ben, tam, tel, mar) only where the users need them."""
+    Each extra language slows OCR, so add others (mar, ben, tam, tel) only where the users need them; the Pune
+    pilot uses eng+hin+mar (render.yaml)."""
     wanted = os.environ.get("FHG_OCR_LANGS", "eng+hin").split("+")
     try:
         out = subprocess.run(["tesseract", "--list-langs"], capture_output=True, text=True, timeout=10).stdout

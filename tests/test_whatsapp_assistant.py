@@ -38,8 +38,16 @@ def family(api, h):
      {"mother": [("type_2_diabetes", None)], "father": [("coronary_artery_disease", 52)]}),
     ("chacha ko lakwa hua tha 65 me", {"paternal_uncle": [("stroke", 65)]}),
     ("मेरी मौसी को कैंसर था", {"maternal_aunt": [("cancer_unspecified", None)]}),
+    # Marathi, in Devanagari and in Latin letters.
+    ("माझ्या आईला वयाच्या ४६ व्या वर्षी स्तनाचा कर्करोग झाला. वडिलांना 51 व्या वर्षी हृदयविकाराचा झटका आला.",
+     {"mother": [("breast_cancer", 46)], "father": [("coronary_artery_disease", 51)]}),
+    ("आजीला मधुमेह आहे आणि काकांना ६५ व्या वर्षी पक्षाघात झाला होता",
+     {"grandmother": [("type_2_diabetes", None)], "paternal_uncle": [("stroke", 65)]}),
+    ("मावशीला कॅन्सर होता", {"maternal_aunt": [("cancer_unspecified", None)]}),
+    ("aaila 46 vya varshi breast cancer zala, vadilanna sugar aahe",
+     {"mother": [("breast_cancer", 46)], "father": [("type_2_diabetes", None)]}),
 ])
-def test_hindi_and_hinglish_family_history(text, expected):
+def test_indian_language_family_history(text, expected):
     f = parse_family_history_text(text)
     assert {m.relationship.value: [(c.category, c.onset_age) for c in m.conditions] for m in f.family} == expected
 
@@ -51,6 +59,8 @@ def test_english_is_untouched():
 
 def test_script_detection_and_messages_complete():
     assert detect_script("माँ को मधुमेह है") == "hi"
+    assert detect_script("आईला मधुमेह आहे") == "mr"
+    assert detect_script("पापा को BP होता है") == "hi"
     assert detect_script("আমার মায়ের ডায়াবেটিস") == "bn"
     assert detect_script("அம்மாவுக்கு நீரிழிவு") == "ta"
     assert detect_script("అమ్మకు మధుమేహం") == "te"

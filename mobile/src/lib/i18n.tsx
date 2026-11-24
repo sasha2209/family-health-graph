@@ -3,9 +3,9 @@ import * as SecureStore from 'expo-secure-store';
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
 
-import { translate, type Lang, type Vars } from './translate';
+import { isLang, translate, type Lang, type Vars } from './translate';
 
-export { LANGS, N, translate, type Lang } from './translate';
+export { isLang, LANGS, LOCALE, N, translate, type Lang } from './translate';
 
 const KEY = 'fhg_lang';
 
@@ -28,7 +28,8 @@ const prefStore = {
 /** The phone's language, if we have it; otherwise English. */
 function deviceLang(): Lang {
   try {
-    return getLocales().some((l) => l.languageCode === 'hi') ? 'hi' : 'en';
+    const found = getLocales().map((l) => l.languageCode).find(isLang);
+    return found ?? 'en';
   } catch {
     return 'en';
   }
@@ -46,7 +47,7 @@ const I18nContext = createContext<I18n>({ lang: 'en', setLang: async () => undef
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>(deviceLang);
   useEffect(() => {
-    prefStore.get().then((saved) => { if (saved === 'en' || saved === 'hi') setLangState(saved); }).catch(() => undefined);
+    prefStore.get().then((saved) => { if (isLang(saved)) setLangState(saved); }).catch(() => undefined);
   }, []);
   const setLang = useCallback(async (next: Lang) => {
     setLangState(next);

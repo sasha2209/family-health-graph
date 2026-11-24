@@ -12,9 +12,11 @@ from contextvars import ContextVar
 from typing import Iterator
 
 from ..notices_hi import NOTICES_HI
+from ..notices_mr import NOTICES_MR
 from .hi import HI
+from .mr import MR
 
-TABLES: dict[str, dict[str, str]] = {"hi": {**HI, **NOTICES_HI}}
+TABLES: dict[str, dict[str, str]] = {"hi": {**HI, **NOTICES_HI}, "mr": {**MR, **NOTICES_MR}}
 _LANG: ContextVar[str] = ContextVar("insight_lang", default="en")
 
 

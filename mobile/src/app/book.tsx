@@ -6,7 +6,7 @@ import { Banner, Body, Button, Card, Chips, ErrorText, Field, Screen, styles } f
 import { rupees } from '../lib/format';
 import { useSession } from '../lib/session';
 import { usePalette } from '../lib/theme';
-import { N, useT } from '../lib/i18n';
+import { LOCALE, N, useT } from '../lib/i18n';
 
 const SLOTS = [
   { value: 'morning', label: N('Morning (7–11)') },
@@ -30,7 +30,7 @@ export default function BookScreen() {
   const q = useLocalSearchParams<{ rule: string; partner: string; partnerName: string; tests: string; testName: string; price?: string }>();
   const { api } = useSession();
   const c = usePalette();
-  const days = nextDays(7, lang === 'hi' ? 'hi-IN' : undefined);
+  const days = nextDays(7, lang === 'en' ? undefined : LOCALE[lang]);
   const [day, setDay] = useState(days[0].value);
   const [slot, setSlot] = useState<string>('morning');
   const [name, setName] = useState('');

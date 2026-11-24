@@ -20,10 +20,23 @@ _SCRIPTS = [("hi", "ऀ", "ॿ"), ("bn", "ঀ", "৿"), ("ta", "஀", "௿"), ("
 
 
 def detect_script(text: str) -> Optional[str]:
-    """The Indian script a message is mostly written in (Devanagari reads as Hindi); None for Latin text."""
+    """The Indian language a message is mostly written in, from its script; None for Latin text. Devanagari reads as
+    Hindi unless it has Marathi words."""
     counts = {lang: sum(lo <= ch <= hi for ch in text) for lang, lo, hi in _SCRIPTS}
     lang, n = max(counts.items(), key=lambda kv: kv[1])
+    if lang == "hi" and n >= 2 and is_marathi(text):
+        return "mr"
     return lang if n >= 2 else None
+
+
+# Words common in Marathi and not used in Hindi ("होता" is both, so it isn't here).
+_MR_MARKERS = ("झाला", "झाली", "झाले", "झालं", "आहे", "आणि", "वर्षी", "माझ्या", "माझी", "माझे",
+               "माझा", "आजोबा", "आत्या", "मावशी", "वडील", "वडिलां", "कर्करोग", "बहीण", "बहिणी", "मुलगा", "मुलगी", "नाही",
+               "आईला", "आईचे", "आईची", "बाबांना")
+
+
+def is_marathi(text: str) -> bool:
+    return sum(m in text for m in _MR_MARKERS) >= 1
 
 
 # --- Hindi / Hinglish → English --------------------------------------------------------------------
@@ -48,6 +61,53 @@ _HI = [
     ("साल की उम्र में", "@AGE"), ("की उम्र में", "@AGE"), ("साल में", "@AGE"), ("में", "@AGE?"),
     ("मेरी", " my "), ("मेरे", " my "), ("मेरा", " my "), ("पड़ा", ""), ("पड़ी", ""),
     ("और", " and "), ("को", " had "), ("है", ""), ("था", ""), ("थी", ""), ("हुआ", ""), ("हुई", ""), ("।", "."),
+]
+
+# Marathi in Devanagari. Applied before the Hindi table, which then picks up shared words (शुगर, बीपी, कैंसर).
+# Case endings stay as separate words once the noun is replaced ("आईला" → "mother ला") and become "had" below.
+_MR = [
+    ("वयाच्या", ""), ("व्या वर्षी", "@AGE"), ("वर्षांची असताना", "@AGE"), ("वर्षांचे असताना", "@AGE"),
+    ("वर्षांचा असताना", "@AGE"), ("वर्षी", "@AGE"),
+    ("आईच्या", "mother's"), ("वडिलांच्या", "father's"),
+    ("आई", "mother"), ("मम्मी", "mother"), ("वडिलां", "father"), ("वडील", "father"), ("बाबां", "father"),
+    ("बाबा", "father"), ("पप्पां", "father"), ("पप्पा", "father"),
+    ("आजोबां", "grandfather"), ("आजोबा", "grandfather"), ("आजी", "grandmother"),
+    ("मावशी", "maternal aunt"), ("मामां", "maternal uncle"), ("मामा", "maternal uncle"), ("आत्या", "paternal aunt"),
+    ("काकां", "paternal uncle"), ("काका", "paternal uncle"), ("काकू", "paternal aunt"),
+    ("भावा", "brother"), ("भाऊ", "brother"), ("दादां", "brother"), ("दादा", "brother"),
+    ("बहिणी", "sister"), ("बहिण", "sister"), ("बहीण", "sister"), ("ताई", "sister"),
+    ("मुलगा", "son"), ("मुला", "son"), ("मुलगी", "daughter"), ("मुली", "daughter"),
+    ("स्तनाचा कर्करोग", "breast cancer"), ("स्तनाचा कॅन्सर", "breast cancer"), ("ब्रेस्ट कॅन्सर", "breast cancer"),
+    ("गर्भाशयाचा कर्करोग", "uterine cancer"), ("गर्भाशयाचा कॅन्सर", "uterine cancer"),
+    ("अंडाशयाचा कर्करोग", "ovarian cancer"), ("अंडाशयाचा कॅन्सर", "ovarian cancer"),
+    ("आतड्याचा कर्करोग", "colon cancer"), ("आतड्याचा कॅन्सर", "colon cancer"),
+    ("जठराचा कर्करोग", "stomach cancer"), ("पोटाचा कॅन्सर", "stomach cancer"),
+    ("प्रोस्टेटचा कर्करोग", "prostate cancer"), ("प्रोस्टेटचा कॅन्सर", "prostate cancer"),
+    ("कर्करोग", "cancer"), ("कॅन्सर", "cancer"), ("मधुमेह", "diabetes"), ("डायबेटीस", "diabetes"),
+    ("डायबिटीस", "diabetes"), ("उच्च रक्तदाब", "high blood pressure"), ("रक्तदाब", "high blood pressure"),
+    ("हृदयविकाराचा झटका", "heart attack"), ("हार्ट अटॅक", "heart attack"), ("हृदयविकार", "heart disease"),
+    ("पक्षाघात", "stroke"), ("अर्धांगवायू", "stroke"), ("कोलेस्टेरॉल", "high cholesterol"),
+    ("माझ्या", " my "), ("माझी", " my "), ("माझे", " my "), ("माझा", " my "), ("आणि", " and "),
+    ("झाला", ""), ("झाली", ""), ("झाले", ""), ("झालं", ""), ("आला", ""), ("आली", ""), ("होता", ""), ("होती", ""),
+    ("होते", ""), ("आहेत", ""), ("आहे", ""), ("।", "."),
+]
+_MR_CASE = re.compile(r"(?<=\s)(?:ांना|ंना|ना|ला|ंनी|नी|ने|ाला|ीला|ेला)(?=[\s.,]|$)")
+
+# Marathi in Latin letters ("aaila 46 vya varshi breast cancer zala").
+_MR_LATIN_HINT = re.compile(r"\b(zala|jhala|zali|jhali|zale|aahe|ahe|aani|varshi|aaila|vadilanna|babanna)\b", re.I)
+_MR_LATIN = [
+    (r"\b(aaila|aaeela|aai|aaee)\b", "mother"), (r"\b(vadilanna|vadil|babanna|baba|pappanna)\b", "father"),
+    (r"\b(ajobanna|ajoba|aajoba)\b", "grandfather"), (r"\b(ajila|aajila|aji|aaji)\b", "grandmother"),
+    (r"\b(mavshila|mavashila|mavshi|mavashi)\b", "maternal aunt"), (r"\b(mamanna|mamala)\b", "maternal uncle"),
+    (r"\b(atyala|atya|aatya)\b", "paternal aunt"), (r"\b(kakanna|kakala|kaka)\b", "paternal uncle"),
+    (r"\b(bhavala|bhau)\b", "brother"), (r"\b(bahinila|bahin|tai|taila)\b", "sister"),
+    (r"\b(mulala|mulga)\b", "son"), (r"\b(mulila|mulgi)\b", "daughter"),
+    (r"\b(sugar|madhumeh|diabetes)\b", "diabetes"), (r"\b(high bp|bp)\b", "high blood pressure"),
+    (r"\b(heart attack|hruday vikar)\b", "heart attack"), (r"\b(paralysis|pakshaghat|lakva)\b", "stroke"),
+    (r"\b(karkrog|kark rog)\b", "cancer"),
+    (r"\b(?:vayachya\s+)?(\d{1,3})\s*(?:vya|va)?\s*varshi\b", r"at \1"),
+    (r"\b(aani|ani)\b", "and"), (r"\b(zala|jhala|zali|jhali|zale|jhale|hota|hoti|aahe|ahe)\b", ""),
+    (r"\b(mazya|mazhya|majhya|mazi|maza|maze)\b", "my"),
 ]
 
 # Hinglish: only applied when the text reads as Hinglish, so English like "blood sugar" or "dada" in a name is safe.
@@ -75,13 +135,24 @@ _HINGLISH = [
 
 
 def normalize_family_text(text: str) -> str:
-    """Hindi / Hinglish family history → English the parser understands. English passes through unchanged."""
+    """Hindi, Hinglish or Marathi family history → English the parser understands. English passes through
+    unchanged."""
     out = text.translate(_DEVANAGARI_DIGITS)
-    if detect_script(out) == "hi":
+    script = detect_script(out)
+    if script == "mr":
+        for mr, en in _MR:
+            out = out.replace(mr, f" {en} ")
+        out = _MR_CASE.sub(" had ", out)
+    if script in ("hi", "mr"):
         for hi, en in _HI:
             out = out.replace(hi, f" {en} ")
         out = re.sub(r"(\d{1,3})\s*@AGE\??", r" at \1 ", out)
         out = out.replace("@AGE?", " ").replace("@AGE", " ")
+    elif _MR_LATIN_HINT.search(out):
+        for pattern, repl in _MR_LATIN:
+            out = re.sub(pattern, repl, out, flags=re.I)
+        out = re.sub(r"\b(mother|father|grandmother|grandfather|aunt|uncle|brother|sister|son|daughter)\b(?!\s+had)",
+                     r"\1 had", out)
     elif _HINGLISH_HINT.search(out):
         for pattern, repl in _HINGLISH:
             out = re.sub(pattern, repl, out, flags=re.I)

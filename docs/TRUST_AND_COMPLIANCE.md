@@ -8,7 +8,7 @@ configuration, and what still needs people and paperwork.
 
 | Obligation | In the product | Where |
 |---|---|---|
-| **Notice** (s.5) | A plain notice of what's collected, why, the rights and who to contact, in **English and Hindi**, public (shown before sign-up) and in Settings → Your privacy rights. | `GET /v1/privacy/notice?lang=en\|hi`, `fhg/privacy.py` |
+| **Notice** (s.5) | A plain notice of what's collected, why, the rights and who to contact, in **English, Hindi and Marathi**, public (shown before sign-up) and in Settings → Your privacy rights. | `GET /v1/privacy/notice?lang=en\|hi\|mr`, `fhg/privacy.py` |
 | **Consent, withdrawn as easily as given** (s.6) | Every optional use is its own switch (AI summaries, AI document reading, WhatsApp summaries, research); every partner, clinic, app and relative can be removed in one tap. | `/v1/consents`, `/v1/grants`, `/v1/links`, `/v1/clinics` |
 | **Security safeguards** (s.8(5)) | Field-level encryption of health data, hashed tokens, per-partner pseudonyms, audit log of every access, security headers, housekeeping of expired credentials. | `fhg/security.py`, `fhg/storage.py`, `POST /admin/tasks/housekeeping` |
 | **Breach notice** (s.8(6)) | A breach register; one call notifies every affected person with what happened, what data, likely consequences, what we did, what they can do, and who to contact. Board intimation and report times are recorded. | `POST /admin/breaches`, `/admin/breaches/{id}/board/{intimation\|report}` |

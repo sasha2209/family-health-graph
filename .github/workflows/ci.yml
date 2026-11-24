@@ -23,7 +23,7 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-hin poppler-utils
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-hin tesseract-ocr-mar poppler-utils
       - run: pip install -r requirements.txt
       - run: python -m pytest -q
 

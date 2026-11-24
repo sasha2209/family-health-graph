@@ -10,7 +10,7 @@ import { useSession } from '../lib/session';
 import { usePalette } from '../lib/theme';
 import type { CareDetail, CareInfo, Dose, Slot } from '../lib/types';
 import { useLoader } from '../lib/useLoader';
-import { N, useT } from '../lib/i18n';
+import { LANGS, LOCALE, N, useT, type Lang } from '../lib/i18n';
 
 const SLOT_LABEL: Record<Slot, string> = { morning: N('Morning · 8 am'), afternoon: N('Afternoon · 2 pm'), night: N('Night · 9 pm') };
 const STATUS_LABEL: Record<Dose['status'], string> = {
@@ -37,7 +37,7 @@ export default function CareScreen() {
   const [allergies, setAllergies] = useState('');
   const [stockFor, setStockFor] = useState<{ id: string; value: string } | null>(null);
   const [shown, setShown] = useState<string | null>(null);
-  const [waForm, setWaForm] = useState<{ phone: string; lang: 'en' | 'hi'; agreed: boolean } | null>(null);
+  const [waForm, setWaForm] = useState<{ phone: string; lang: Lang; agreed: boolean } | null>(null);
 
   if (!data) return <Screen>{error ? <ErrorText>{error}</ErrorText> : <Loading />}</Screen>;
   const d: CareDetail = { ...data, name: data.has_name ? data.name : capitalize(t(label(data.relationship_code))) };
@@ -124,7 +124,7 @@ export default function CareScreen() {
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', padding: 16 }}>
             {d.week.map((w) => (
               <View key={w.day} style={{ alignItems: 'center', gap: 4 }}>
-                <Text style={{ color: c.muted, fontSize: 12 }}>{new Date(w.day).toLocaleDateString(lang === 'hi' ? 'hi-IN' : 'en-IN', { weekday: 'narrow' })}</Text>
+                <Text style={{ color: c.muted, fontSize: 12 }}>{new Date(w.day).toLocaleDateString(LOCALE[lang], { weekday: 'narrow' })}</Text>
                 <Text style={{ color: w.scheduled && w.taken === w.scheduled ? c.accent : c.text, fontSize: 13, fontWeight: '600' }}>
                   {w.scheduled ? `${w.taken}/${w.scheduled}` : '–'}
                 </Text>
@@ -273,8 +273,8 @@ export default function CareScreen() {
             <Body muted>{t('For someone who doesn’t use the app. They get each dose time on WhatsApp and reply 1 when they’ve taken their medicines. You see it here.')}</Body>
             <Field label={t('Their WhatsApp number')} value={waForm.phone} keyboardType="phone-pad" placeholder="+91 98xxx xxxxx"
                    onChangeText={(v) => setWaForm({ ...waForm, phone: v })} />
-            <Chips label={t('Language for their messages')} options={[{ value: 'hi', label: 'हिन्दी' }, { value: 'en', label: 'English' }]}
-                   value={waForm.lang} onChange={(v) => setWaForm({ ...waForm, lang: v as 'en' | 'hi' })} />
+            <Chips label={t('Language for their messages')} options={LANGS.map((l) => ({ value: l.code, label: l.name }))}
+                   value={waForm.lang} onChange={(v) => setWaForm({ ...waForm, lang: v as Lang })} />
             <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: waForm.agreed }}
                        onPress={() => setWaForm({ ...waForm, agreed: !waForm.agreed })}
                        style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start' }}>
@@ -298,7 +298,7 @@ export default function CareScreen() {
         ) : (
           <Row title={t('Send reminders to their WhatsApp')}
                detail={d.whatsapp?.status === 'stopped' ? t('Turned off. Set up again to restart.') : t('For someone who doesn’t use the app')}
-               onPress={() => setWaForm({ phone: '', lang: 'hi', agreed: false })} last />
+               onPress={() => setWaForm({ phone: '', lang: lang === 'en' ? 'hi' : lang, agreed: false })} last />
         )}
       </Section>
 

@@ -1,4 +1,5 @@
-"""Action items in Hindi: every template the rules use has a translation, and the English output is untouched."""
+"""Action items in Hindi and Marathi: every template the rules use has a translation, and the English output is
+untouched."""
 import ast
 import re
 from datetime import date
@@ -9,7 +10,9 @@ from fhg.insights.hi import HI as RULES_HI
 from fhg.notices_hi import NOTICES_HI
 
 HI = {**RULES_HI, **NOTICES_HI}
-from fhg.insights.lang import language, tr
+import pytest
+
+from fhg.insights.lang import TABLES, language, tr
 from fhg.insights.rules import ACTIVITY_LABEL
 from fhg.models import Condition, FamilyMember, HealthProfile, Observation, Relationship, Sex
 from fhg.terminology import CONCEPTS
@@ -38,14 +41,26 @@ def templates() -> set[str]:
     return out
 
 
-def test_every_template_has_hindi():
-    missing = sorted(t for t in templates() if t not in HI)
-    assert missing == [], "Add to fhg/insights/hi.py:\n" + "\n".join(repr(m) for m in missing)
+@pytest.mark.parametrize("lang", sorted(TABLES))
+def test_every_template_is_translated(lang):
+    missing = sorted(t for t in templates() if t not in TABLES[lang])
+    assert missing == [], f"Add to fhg/insights/{lang}.py:\n" + "\n".join(repr(m) for m in missing)
 
 
-def test_placeholders_match():
-    for en, hi in HI.items():
-        assert sorted(re.findall(r"\{\w+\}", en)) == sorted(re.findall(r"\{\w+\}", hi)), en
+@pytest.mark.parametrize("lang", sorted(TABLES))
+def test_placeholders_match(lang):
+    for en, out in TABLES[lang].items():
+        assert sorted(re.findall(r"\{\w+\}", en)) == sorted(re.findall(r"\{\w+\}", out)), en
+
+
+def test_marathi_insights_read_in_marathi():
+    with language("mr"):
+        marathi = generate_insights(profile())
+    hboc = next(i for i in marathi.insights if i.rule_id == "hboc_family_pattern")
+    assert hboc.title.startswith("कुटुंबातील") and "आई: स्तनाचा कर्करोग" in hboc.evidence[0]
+    for i in marathi.insights:
+        for text in [i.title, i.summary, i.recommendation, *i.evidence]:
+            assert not re.search(r"\b(the|your|and|with|is)\b", text), (i.rule_id, text)
 
 
 def profile():
@@ -92,6 +107,7 @@ def test_api_language(tmp_path):
     report = api.get("/v1/insights", headers=h).json()
     assert title(report).startswith("परिवार में") and report["disclaimer"].startswith("ये सलाह")
     assert title(api.get("/v1/insights?lang=en", headers=h).json()).startswith("Family pattern")
+    assert title(api.get("/v1/insights?lang=mr", headers=h).json()).startswith("कुटुंबातील")
     # The doctor's summary stays in English whatever the person's language.
     assert "Family pattern worth a hereditary cancer risk assessment" in api.get("/v1/report/clinician", headers=h).text
 
