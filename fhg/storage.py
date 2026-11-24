@@ -280,6 +280,35 @@ CREATE TABLE IF NOT EXISTS emergency_links (
     views INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
+-- DPDP Act: a nominee to exercise the person's rights on death or incapacity (s.14), grievances (s.13), and the
+-- register of personal data breaches with the notices sent (s.8(6)). Personal details are encrypted.
+CREATE TABLE IF NOT EXISTS nominees (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    data BLOB NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS grievances (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    category TEXT NOT NULL,
+    message BLOB NOT NULL,
+    status TEXT NOT NULL,             -- open | resolved
+    response BLOB,
+    created_at TEXT NOT NULL,
+    due_at TEXT NOT NULL,
+    resolved_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_grievances_status ON grievances(status, due_at);
+CREATE TABLE IF NOT EXISTS breaches (
+    id TEXT PRIMARY KEY,
+    data BLOB NOT NULL,               -- encrypted JSON: what happened, data affected, measures, contact
+    occurred_at TEXT,
+    detected_at TEXT NOT NULL,
+    affected INTEGER NOT NULL,
+    board_intimated_at TEXT,
+    board_report_at TEXT,
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS nudges (
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     key TEXT NOT NULL,
@@ -670,6 +699,85 @@ class Store:
         return [{"id": r["id"], "partner_id": r["partner_id"], "partner_name": r["partner_name"],
                  "referral_id": r["referral_id"], "created_at": r["created_at"],
                  **json.loads(self._cipher.decrypt(r["data"]))} for r in rows]
+
+    # --- privacy rights (DPDP Act) -------------------------------------------------------------
+    def set_nominee(self, user_id: str, data: Optional[dict]) -> None:
+        with self._lock, self._conn:
+            if data is None:
+                self._conn.execute("DELETE FROM nominees WHERE user_id = ?", (user_id,))
+            else:
+                self._conn.execute("INSERT OR REPLACE INTO nominees (user_id, data, updated_at) VALUES (?, ?, ?)",
+                                   (user_id, self._cipher.encrypt(json.dumps(data)), _now()))
+
+    def nominee(self, user_id: str) -> Optional[dict]:
+        rows = self._query("SELECT data, updated_at FROM nominees WHERE user_id = ?", (user_id,))
+        return json.loads(self._cipher.decrypt(rows[0]["data"])) | {"updated_at": rows[0]["updated_at"]} if rows else None
+
+    def create_grievance(self, user_id: str, category: str, message: str, due_at: str) -> str:
+        gid = uuid.uuid4().hex[:12]
+        with self._lock, self._conn:
+            self._conn.execute("INSERT INTO grievances (id, user_id, category, message, status, created_at, due_at) "
+                               "VALUES (?, ?, ?, ?, 'open', ?, ?)",
+                               (gid, user_id, category, self._cipher.encrypt(message), _now(), due_at))
+        return gid
+
+    def _grievance(self, r: sqlite3.Row) -> dict:
+        return {k: r[k] for k in ("id", "user_id", "category", "status", "created_at", "due_at", "resolved_at")} | {
+            "message": self._cipher.decrypt(r["message"]),
+            "response": self._cipher.decrypt(r["response"]) if r["response"] else None}
+
+    def grievances(self, user_id: Optional[str] = None, status: Optional[str] = None) -> list[dict]:
+        sql, params = "SELECT * FROM grievances WHERE 1=1", []
+        if user_id:
+            sql += " AND user_id = ?"; params.append(user_id)
+        if status:
+            sql += " AND status = ?"; params.append(status)
+        return [self._grievance(r) for r in self._query(sql + " ORDER BY due_at", tuple(params))]
+
+    def resolve_grievance(self, gid: str, response: str, status: str) -> Optional[dict]:
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE grievances SET response = ?, status = ?, resolved_at = CASE WHEN ? = 'resolved' "
+                               "THEN ? ELSE NULL END WHERE id = ?",
+                               (self._cipher.encrypt(response), status, status, _now(), gid))
+        rows = self._query("SELECT * FROM grievances WHERE id = ?", (gid,))
+        return self._grievance(rows[0]) if rows else None
+
+    def record_breach(self, data: dict, occurred_at: Optional[str], detected_at: str, affected: int) -> str:
+        bid = uuid.uuid4().hex[:12]
+        with self._lock, self._conn:
+            self._conn.execute("INSERT INTO breaches (id, data, occurred_at, detected_at, affected, created_at) "
+                               "VALUES (?, ?, ?, ?, ?, ?)",
+                               (bid, self._cipher.encrypt(json.dumps(data)), occurred_at, detected_at, affected, _now()))
+        return bid
+
+    def breaches(self) -> list[dict]:
+        return [{k: r[k] for k in ("id", "occurred_at", "detected_at", "affected", "board_intimated_at", "board_report_at",
+                                   "created_at")} | json.loads(self._cipher.decrypt(r["data"]))
+                for r in self._query("SELECT * FROM breaches ORDER BY created_at DESC")]
+
+    def mark_breach_board(self, bid: str, stage: str) -> bool:
+        column = {"intimation": "board_intimated_at", "report": "board_report_at"}[stage]
+        with self._lock, self._conn:
+            cur = self._conn.execute(f"UPDATE breaches SET {column} = ? WHERE id = ?", (_now(), bid))
+        return cur.rowcount > 0
+
+    def housekeeping(self) -> dict:
+        """Delete what has expired: sign-in codes, connect states, OAuth codes and tokens, care invites,
+        emergency links (kept 30 days after expiry for the audit trail's context), and old reminder records."""
+        now = _now()
+        month_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        year_ago = (datetime.now(timezone.utc) - timedelta(days=365)).isoformat()
+        out = {}
+        with self._lock, self._conn:
+            for table, where, params in [
+                ("login_codes", "expires_at < ?", (now,)), ("connect_states", "expires_at < ?", (now,)),
+                ("oauth_codes", "expires_at < ?", (now,)), ("oauth_tokens", "expires_at < ?", (now,)),
+                ("care_invites", "expires_at < ? OR used_at IS NOT NULL", (now,)),
+                ("emergency_links", "expires_at < ? OR revoked_at < ?", (month_ago, month_ago)),
+                ("nudges", "sent_at < ?", (year_ago,)),
+            ]:
+                out[table] = self._conn.execute(f"DELETE FROM {table} WHERE {where}", params).rowcount
+        return out
 
     # --- caregiver mode ---------------------------------------------------------------------
     def add_caregiver(self, owner_id: str, member_id: str, caregiver_id: str, name: Optional[str]) -> None:

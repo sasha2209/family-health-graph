@@ -16,6 +16,9 @@ import type {
   Booking,
   TestOffer,
   RiskReport,
+  Nominee,
+  PrivacyNotice,
+  PrivacySummary,
   CareDetail,
   CareInfo,
   CareSummary,
@@ -126,7 +129,17 @@ export function createApi(token: string | null) {
     connectSmart: (provider: string, returnTo?: string) =>
       authed<{ authorize_url: string }>('/v1/connect/smart', { method: 'POST', body: { provider, return_to: returnTo } }),
     syncConnection: (id: string) =>
-      authed<IngestResult>(`/v1/connections/${encodeURIComponent(id)}/sync`, { method: 'POST' }),
+      authed<{ status?: string; message?: string; merged: Record<string, number> | null }>(
+        `/v1/connections/${encodeURIComponent(id)}/sync`, { method: 'POST' }),
+    connectAbha: (abhaAddress: string) =>
+      authed<{ id: string; status: string; message: string }>('/v1/connect/abha', { method: 'POST', body: { abha_address: abhaAddress } }),
+    privacy: () => authed<PrivacySummary>('/v1/privacy'),
+    privacyNotice: (lang: string) => authed<PrivacyNotice>(`/v1/privacy/notice?lang=${encodeURIComponent(lang)}`),
+    privacyExport: () => requestText('/v1/privacy/export', token),
+    setNominee: (body: Nominee) => authed<Nominee>('/v1/privacy/nominee', { method: 'PUT', body }),
+    removeNominee: () => authed<void>('/v1/privacy/nominee', { method: 'DELETE' }),
+    raiseGrievance: (category: string, message: string) =>
+      authed<{ id: string; message: string }>('/v1/privacy/grievances', { method: 'POST', body: { category, message } }),
     deleteConnection: (id: string) => authed<void>(`/v1/connections/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     oauthRequest: (q: { client_id: string; redirect_uri: string; scope: string }) =>
       authed<OAuthRequestInfo>(`/v1/oauth/request?${new URLSearchParams(q).toString()}`),

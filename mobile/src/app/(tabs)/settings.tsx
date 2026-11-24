@@ -261,6 +261,7 @@ export default function SettingsScreen() {
           />
         </View>
         <View style={styles.row}>
+          <Button title="Your privacy rights" variant="primary" onPress={() => router.push('/privacy')} />
           <Button title="Export my data (FHIR)" onPress={async () => {
             const bundle = await api.exportFhir();
             await Share.share({ title: 'My health record (FHIR)', message: JSON.stringify(bundle, null, 2) });

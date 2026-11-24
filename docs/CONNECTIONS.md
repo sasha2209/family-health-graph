@@ -44,10 +44,30 @@ Users can download a record from the ABHA app or a hospital as a FHIR R4 file (`
 
 This needs no ABDM certification and works today.
 
-### Next: become an ABDM Health Information User (HIU) / PHR app
-This needs the ABDM sandbox (client ID and secret), the gateway callbacks, and then certification (functional and
-security audit) before going live.
+### Built: direct ABHA link through NHA's ABDM Wrapper
+Instead of implementing the gateway protocol and Fidelius encryption ourselves, we run NHA's open-source
+[ABDM Wrapper](https://github.com/NHA-ABDM/ABDM-wrapper) next to the server and call its v3 HIU facade
+(`fhg/connectors/abdm.py`; paths and payloads from the wrapper's own `docs/wrapperV3.yaml` and Java sources):
 
+1. The person enters their ABHA address (`name@abdm`, or `name@sbx` in the sandbox) in **Connected records**.
+2. `POST /v1/connect/abha` → wrapper `POST /v3/consent-init`: purpose *Care Management* (`CAREMGT`), all record
+   types, the last 10 years, access mode `STORE`, data erased after a year unless consent is renewed.
+3. They approve it in their ABHA/PHR app.
+4. **Sync now** (`POST /v1/connections/{id}/sync`) → `GET /v3/consent-status/{id}`. Once granted, one artefact per
+   hospital or lab: `POST /v3/health-information/fetch-records`, then `GET /v3/health-information/status/{id}` for
+   the decrypted FHIR bundles. These go through the FHIR import with `abdm:<HIP id>` provenance. Each artefact is
+   fetched and imported once.
+5. Declined, revoked or expired consent shows on the connection; records already imported stay.
+
+Configure with `FHG_ABDM_WRAPPER_URL` (the wrapper's base URL, on a private network) and `FHG_ABDM_HIU_ID` (our
+HIU id from ABDM registration); `FHG_ABDM_REQUESTER_NAME` is what people see in the consent request.
+
+**To go live:** register as an HIU in the ABDM sandbox; deploy the wrapper (it brings its own MongoDB) with our
+client id and secret; check the wrapper's API against the current sandbox (its latest release is from early 2025);
+pass ABDM's functional and security certification. The wrapper handles the gateway session, callbacks and Fidelius
+encryption described below.
+
+### Protocol notes (for reference)
 Confirmed from NHA's own ABDM-wrapper repository (v3 gateway):
 - Session token: `POST https://dev.abdm.gov.in/api/hiecm/gateway/v3/sessions`, with headers `REQUEST-ID` (UUID),
   `TIMESTAMP` (ISO 8601 UTC with milliseconds) and `X-CM-ID` (`sbx` in sandbox, `abdm` in production), and body
@@ -60,17 +80,4 @@ Health data is encrypted with **Fidelius** (confirmed from the open-source fidel
 - HKDF-SHA256 over the shared secret, with no info, gives a 32-byte key.
 - AES-256-GCM with a 128-bit tag appended to the ciphertext, then base64.
 
-Because BouncyCastle's curve form differs from standard X25519 libraries, we will verify against sandbox test
-vectors (or run fidelius-cli alongside the server) before decrypting real data.
-
-To confirm in the sandbox before building: the v3 paths and payloads for the consent request (init and on-init),
-the consent notification, the health-information request, and the data push to our `dataPushUrl`.
-
-The planned flow:
-1. The user enters their ABHA address in the app.
-2. We raise a consent request (purpose `SELF`, which is self-requested, or care management) for the record types
-   and date range they choose.
-3. They approve it in their ABHA app.
-4. We request the data.
-5. The HIPs push Fidelius-encrypted FHIR bundles to us.
-6. Each bundle goes through the same reader as the record files above and waits in review.
+The wrapper does this decryption; these notes matter only if we ever replace it.

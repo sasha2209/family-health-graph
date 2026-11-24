@@ -249,9 +249,9 @@ export interface Connection {
   kind: 'smart' | 'abdm';
   provider: string;
   display_name: string;
-  status: 'active' | 'pending' | 'error';
+  status: 'active' | 'pending' | 'error' | 'denied' | 'revoked' | 'expired';
   last_sync_at: string | null;
-  last_sync_summary: { read: Record<string, number>; merged: Record<string, number> } | null;
+  last_sync_summary: { read?: Record<string, number>; merged?: Record<string, number>; waiting?: string } | null;
 }
 
 // --- apps with access (Connect with Family Health Graph) ---------------------------------
@@ -338,4 +338,26 @@ export interface CareDetail extends Omit<CareSummary, 'refills_due'> {
   info: CareInfo;
   caregivers: { user_id: string; name: string | null; joined_at: string }[];
   emergency_links: { id: string; expires_at: string; views: number; created_at: string }[];
+}
+
+// --- privacy rights (/v1/privacy) -----------------------------------------------------------------
+export interface PrivacyNotice {
+  lang: string; available_languages: string[]; title: string; controller: string; summary: string;
+  sections: { heading: string; items: { title: string; detail?: string }[] }[];
+  contact: { heading: string; name: string | null; email: string | null; response_days: number };
+}
+export interface Grievance {
+  id: string; category: string; message: string; status: 'open' | 'resolved'; response: string | null;
+  created_at: string; due_at: string;
+}
+export interface Nominee { name: string; relationship: string; phone: string | null; email: string | null }
+export interface PrivacySummary {
+  held: { category: string; count: number; detail: string }[];
+  connections: { name: string; status: string }[];
+  shared_with: { with: string; what: string; since: string; until?: string }[];
+  processors: { name: string; active: boolean }[];
+  nominee: Nominee | null;
+  grievances: Grievance[];
+  minor: boolean;
+  contact: { name: string | null; email: string | null; response_days: number };
 }
