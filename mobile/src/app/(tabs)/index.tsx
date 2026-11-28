@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Text, View } from 'react-native';
 
 import { Badge, Check, Progress, Row, Section } from '../../components/list';
+import { StudyCard } from '../../components/StudyCard';
 import { SurveyCard } from '../../components/SurveyCard';
 import { Banner, Body, Button, Card, ErrorText, H2, Loading, Screen, styles } from '../../components/ui';
 import { shareDoctorSummary } from '../../lib/doctorSummary';
@@ -98,6 +99,7 @@ export default function HomeScreen() {
         </View>
       )}
 
+      <StudyCard />
       <SurveyCard />
 
       {pending.length > 0 && (

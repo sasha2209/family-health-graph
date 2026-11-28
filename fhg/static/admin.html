@@ -289,7 +289,14 @@
     const survey = Object.values(r.survey).map((s) => `<h3 style="font-size:14px;margin:14px 0 6px">${esc(s.question)}</h3>
       ${s.responses ? table(Object.entries(s.answers).map(([a, n]) => [a.replace(/_/g, ' '), `${n} (${Math.round(100 * n / s.responses)}%)`]))
         : '<p class="muted small">No answers yet.</p>'}`).join('');
-    $('#report').innerHTML = `
+    const st = r.study || {};
+    const studyNote = st.consent_required
+      ? `<p class="msg small">Run as a study: counting only the ${esc(st.active)} families who consented (information sheet
+         <strong>${esc(st.version)}</strong>). ${esc(st.withdrawn)} withdrew, ${esc(st.declined)} said not now.
+         <a href="/study" target="_blank" rel="noopener">Information sheet and consent form</a></p>`
+      : `<p class="muted small">Counting every family (service evaluation). To publish results, run it as an ethics-approved
+         study: see docs/ETHICS.md. <a href="/study" target="_blank" rel="noopener">Draft information sheet and consent form</a></p>`;
+    $('#report').innerHTML = studyNote + `
       <div class="tiles">${[['Families', f.total], ['Something to act on', r.findings.families_with_an_item],
         ['Tests completed', `${tst.completed} of ${tst.booked}`], ['Doses taken (28 days)', pct(cg.adherence_percent)]]
         .map(([l, n]) => `<div class="tile"><div class="n">${esc(n)}</div><div class="l">${esc(l)}</div></div>`).join('')}</div>

@@ -53,9 +53,10 @@ def _pct(n: int, d: int) -> Optional[float]:
     return round(100 * n / d, 1) if d else None
 
 
-def report(store, now: Optional[datetime] = None) -> dict:
+def report(store, now: Optional[datetime] = None, only: Optional[set[str]] = None) -> dict:
+    """``only``: count just these accounts (study participants, when the pilot is run as a study)."""
     now = now or datetime.now(timezone.utc)
-    users = store.users_overview()
+    users = [u for u in store.users_overview() if only is None or u["id"] in only]
     uids = [u["id"] for u in users]
     profiles = {uid: store.get_profile(uid) for uid in uids}
 
@@ -138,6 +139,11 @@ def to_csv(r: dict) -> str:
     w = csv.writer(out)
     w.writerow(["Section", "Measure", "Value"])
     w.writerow(["Report", "Generated", r["generated_at"][:10]])
+    st = r.get("study") or {}
+    if st.get("consent_required"):
+        w.writerow(["Report", "Counts only study participants (information sheet version)", st["version"]])
+        w.writerow(["Report", "Participants", _shown(st["active"])])
+        w.writerow(["Report", "Withdrew", _shown(st["withdrawn"])])
     labels = {
         "families": {"total": "Families taking part", "with_relatives": "Added at least one relative",
                      "with_three_generations": "Recorded three generations", "median_relatives": "Median relatives recorded",

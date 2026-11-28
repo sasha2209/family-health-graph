@@ -35,6 +35,7 @@ function RootStack() {
         <Stack.Screen name="book" options={{ title: t('Book a test') }} />
         <Stack.Screen name="care" options={{ title: t('Caregiver mode') }} />
         <Stack.Screen name="privacy" options={{ title: t('Your privacy') }} />
+        <Stack.Screen name="study" options={{ title: t('Pilot study') }} />
         <Stack.Screen name="authorize" options={{ title: t('Share your family history'), headerBackVisible: false }} />
       </Stack.Protected>
       <Stack.Protected guard={!token} redirectTo="/">

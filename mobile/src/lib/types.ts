@@ -365,3 +365,22 @@ export interface PrivacySummary {
   minor: boolean;
   contact: { name: string | null; email: string | null; response_days: number };
 }
+
+/** The pilot as a research study (fhg/study.py): the information sheet and this person's consent. */
+export interface Study {
+  enabled: boolean;
+  lang: string;
+  version: string;
+  version_label: string;
+  title: string;
+  summary: string;
+  sections: { heading: string; text: string }[];
+  statements: string[];
+  contact_heading: string;
+  contacts: { role: string; name: string | null; contact: string | null }[];
+  buttons: { agree: string; decline: string; withdraw: string };
+  status: 'not_asked' | 'taking_part' | 'declined' | 'withdrew';
+  consented_version: string | null;
+  consented_at: string | null;
+  withdrawn_at: string | null;
+}

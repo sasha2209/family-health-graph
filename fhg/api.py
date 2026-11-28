@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
-from . import auth, backup as backups, bookings, care, clinic, emergency, i18n, monitoring, pilot, practice, privacy, inbound, partners, push, risk_models, trends
+from . import auth, backup as backups, bookings, care, clinic, emergency, i18n, monitoring, pilot, practice, privacy, study, inbound, partners, push, risk_models, trends
 from .connectors import abdm, smart
 from . import partner_oauth as poauth
 from .clinician_report import render_html as clinician_report_html
@@ -94,6 +94,14 @@ class Settings:
     grievance_officer_name: Optional[str] = None
     grievance_officer_email: Optional[str] = None
     grievance_days: int = 30
+    # The pilot as an ethics-approved study (docs/ETHICS.md): offer it, record informed consent with the approved
+    # information sheet's version, and count only participants in the pilot report.
+    study: bool = False
+    study_version: str = "draft-1"
+    study_investigator: Optional[str] = None
+    study_investigator_contact: Optional[str] = None
+    study_committee: Optional[str] = None
+    study_committee_contact: Optional[str] = None
     # Running a pilot (docs/RUNNING_IN_PRODUCTION.md): background jobs, backups, error tracking.
     # WhatsApp templates for medicine reminders on a cared-for person's own phone (docs/CAREGIVER_MODE.md).
     whatsapp_template_care_optin: str = "care_optin"
@@ -135,6 +143,12 @@ class Settings:
             grievance_officer_name=os.environ.get("FHG_GRIEVANCE_OFFICER_NAME") or None,
             grievance_officer_email=os.environ.get("FHG_GRIEVANCE_OFFICER_EMAIL") or None,
             grievance_days=int(os.environ.get("FHG_GRIEVANCE_DAYS") or cls.grievance_days),
+            study=os.environ.get("FHG_STUDY", "").lower() in ("1", "on", "true", "yes"),
+            study_version=os.environ.get("FHG_STUDY_VERSION") or cls.study_version,
+            study_investigator=os.environ.get("FHG_STUDY_INVESTIGATOR") or None,
+            study_investigator_contact=os.environ.get("FHG_STUDY_INVESTIGATOR_CONTACT") or None,
+            study_committee=os.environ.get("FHG_STUDY_COMMITTEE") or None,
+            study_committee_contact=os.environ.get("FHG_STUDY_COMMITTEE_CONTACT") or None,
             whatsapp_template_care_optin=os.environ.get("FHG_WA_TEMPLATE_CARE_OPTIN") or cls.whatsapp_template_care_optin,
             whatsapp_template_care_reminder=os.environ.get("FHG_WA_TEMPLATE_CARE_REMINDER") or cls.whatsapp_template_care_reminder,
             scheduler=os.environ.get("FHG_SCHEDULER", "").lower() in ("1", "on", "true", "yes"),
@@ -258,6 +272,11 @@ class DocumentSaveIn(BaseModel):
 class SmartStartIn(BaseModel):
     provider: str
     return_to: Optional[str] = Field(None, description="App path to return to afterwards, e.g. /app/connections")
+
+
+class StudyConsentIn(BaseModel):
+    version: str = Field(description="The information sheet version the person read (from GET /v1/study)")
+    agreed: bool = Field(description="They ticked every consent statement")
 
 
 class ConsentIn(BaseModel):
@@ -756,6 +775,8 @@ def create_app(settings: Optional[Settings] = None,
     def surveys_due(user_id: str = Depends(current_user)) -> list[dict]:
         """Optional pilot questions to show now (at sign-up, and again after 8 weeks). Answers are only reported
         as counts across all families."""
+        if settings.study and not store.has_consent(user_id, study.CONSENT_STUDY):
+            return []                                  # in a study, only participants are asked
         created = next((u["created_at"] for u in store.users_overview() if u["id"] == user_id), None)
         answered = {a["question"] for a in store.survey_answers(user_id)}
         due = pilot.due_questions(created, answered, datetime.now(timezone.utc)) if created else []
@@ -770,6 +791,51 @@ def create_app(settings: Optional[Settings] = None,
             raise HTTPException(422, f"Answer with one of {q['options']}, or skipped")
         store.save_survey_answer(user_id, question, body.answer)
         return Response(status_code=204)
+
+    # --- the pilot study (informed consent) ---------------------------------------------
+    def study_sheet(lang: str) -> dict:
+        return study.info(lang, settings.study_version, settings.study_investigator,
+                          settings.study_investigator_contact, settings.study_committee,
+                          settings.study_committee_contact) | {"enabled": settings.study}
+
+    @app.get("/v1/public/study")
+    def public_study(lang: str = Query("en", pattern="^[a-z]{2}$")) -> dict:
+        """The participant information sheet, for the intake page, the printable form at /study and the IEC."""
+        return study_sheet(lang)
+
+    @app.get("/v1/study")
+    def my_study(lang: Optional[str] = Query(None, pattern="^[a-z]{2}$"), user_id: str = Depends(current_user)) -> dict:
+        row = store.consent_row(user_id, study.CONSENT_STUDY)
+        status = ("taking_part" if row and row["granted_at"] and not row["revoked_at"] else
+                  "withdrew" if row and row["granted_at"] else "declined" if row else "not_asked")
+        return study_sheet(lang or store.user_lang(user_id)) | {
+            "status": status, "consented_version": row["version"] if row else None,
+            "consented_at": row["granted_at"] if row else None, "withdrawn_at": row["revoked_at"] if row and row["granted_at"] else None}
+
+    @app.post("/v1/study/consent")
+    def study_consent(body: StudyConsentIn, user_id: str = Depends(current_user)) -> dict:
+        if not settings.study:
+            raise HTTPException(404, "There is no study running")
+        if body.version != settings.study_version:
+            raise HTTPException(409, "The information sheet has changed. Please read the current version.")
+        if not body.agreed:
+            raise HTTPException(422, "Every statement must be agreed to")
+        require_adult(user_id, "Taking part in the study")
+        store.set_consent(user_id, study.CONSENT_STUDY, True, settings.study_version)
+        store.audit(user_id, "user", "study.consented", {"version": settings.study_version})
+        return my_study(None, user_id)
+
+    @app.post("/v1/study/decline")
+    def study_decline(user_id: str = Depends(current_user)) -> dict:
+        store.decline_consent(user_id, study.CONSENT_STUDY)
+        return my_study(None, user_id)
+
+    @app.delete("/v1/study/consent")
+    def study_withdraw(user_id: str = Depends(current_user)) -> dict:
+        """Withdraw at any time. Care and the record are unaffected; from now on they aren't counted."""
+        store.set_consent(user_id, study.CONSENT_STUDY, False)
+        store.audit(user_id, "user", "study.withdrew")
+        return my_study(None, user_id)
 
     @app.put("/v1/profile/language")
     def set_language(body: LanguageIn, user_id: str = Depends(current_user)) -> dict:
@@ -1847,7 +1913,9 @@ def create_app(settings: Optional[Settings] = None,
     def admin_pilot_report(format: str = Query("json", pattern="^(json|csv)$")) -> Response:
         """Outcomes across every family in the pilot: onboarding, findings, tests, referrals, caregiving, surveys.
         The CSV is for sharing: counts from 1 to 4 are shown as "<5"."""
-        r = pilot.report(store)
+        r = pilot.report(store, only=set(store.users_with_consent(study.CONSENT_STUDY)) if settings.study else None)
+        r["study"] = {"consent_required": settings.study, "version": settings.study_version,
+                      **store.consent_counts(study.CONSENT_STUDY)}
         if format == "csv":
             return Response(pilot.to_csv(r), media_type="text/csv; charset=utf-8", headers={
                 "Content-Disposition": f'attachment; filename="pilot-report-{r["generated_at"][:10]}.csv"',
@@ -2312,6 +2380,12 @@ def create_app(settings: Optional[Settings] = None,
             "{{CODE}}", esc(org["patient_code"])).replace("{{PORTAL}}", esc(public_base(request) + "/portal")).replace(
             "{{PRIVACY}}", esc(settings.grievance_officer_email or "Settings → Your privacy rights in the app")).replace(
             "{{LANG}}", org_lang(org)).replace("{{LANGNAME}}", LANG_NAME[org_lang(org)])
+
+    @app.get("/study", response_class=HTMLResponse, include_in_schema=False)
+    def study_page() -> str:
+        """The participant information sheet and consent form, printable in English, Hindi and Marathi (for paper
+        consent at the clinic, and for the ethics committee)."""
+        return (PKG_DIR / "static" / "study.html").read_text()
 
     @app.get("/portal", response_class=HTMLResponse, include_in_schema=False)
     def portal_page() -> str:
