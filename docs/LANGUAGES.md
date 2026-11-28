@@ -52,6 +52,35 @@ Marathi reports contain no English sentences.
 - **Breach notices** are written by the privacy officer in the console.
 - **The AI plain-language summary** (an optional feature).
 
+## Getting the translations reviewed
+
+Reviewers work in a spreadsheet, not in code:
+
+```bash
+python -m fhg.translation_review export mr review-mr.xlsx                    # all 967 strings
+python -m fhg.translation_review export mr review-mr-clinical.xlsx --clinical-only   # the health advice only
+```
+
+Each row has the English, the current translation, the screen or message it appears in, and who should check it
+(native speaker; clinician and native speaker for health advice; privacy officer for the privacy notice). Reviewers
+type a better wording in **Your correction**, or choose **OK**, and can leave a **Comment**. The "Read me" sheet
+explains this in English and in the language being reviewed.
+
+When the sheet comes back:
+
+```bash
+python -m fhg.translation_review import review-mr.xlsx --dry-run   # what would change, and reviewer comments
+python -m fhg.translation_review import review-mr.xlsx             # writes the corrections into the code
+```
+
+Import writes each correction into the file it came from (`mobile/src/locales/mr.ts`, `fhg/insights/mr.py`, the
+notices, reminders, lock-screen texts and privacy notice). It refuses a correction that drops or renames a
+`{placeholder}`, and one whose translation was changed in the code after the sheet was made, so two reviewers can't
+overwrite each other. Then run the tests and open a pull request.
+
+The clinic poster, staff guide and intake page aren't in the sheet. Review those by opening them from the clinic
+portal.
+
 ## Adding a language
 
 1. App: copy `mobile/src/locales/mr.ts` to `<code>.ts` and translate the values. Add the language to `Lang`,
