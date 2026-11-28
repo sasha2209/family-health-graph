@@ -82,3 +82,33 @@ def test_deleting_removes_only_made_up_patients(api):
     assert api.get("/v1/orgs", headers=staff).json() == []                     # trainees keep their accounts
     assert api.get("/v1/profile", headers=staff).status_code == 200
     assert api.get("/v1/orgs", headers=real).json()[0]["name"] == "Real clinic"
+
+
+def test_needs_attention(api):
+    made = api.post("/admin/practice-clinics", headers=ADMIN, json={}).json()
+    staff = account(api)
+    org = api.post("/v1/orgs/join", headers=staff, json={"code": made["staff_code"]}).json()
+    work = api.get(f"/v1/orgs/{org['id']}/patients", headers=staff).json()
+    items = {(a["display_name"], a["status"]) for a in work["attention"]}
+    assert ("Sunita Kulkarni", "referred") in items                     # referred 20 days ago, no news
+    assert ("Rajesh Deshpande", "scheduled") in items                   # scheduled 40 days ago
+    assert ("Lata Wagh", "identified") in items                         # discuss soon, 12 days, no decision
+    assert not any(name == "Anil Patil" for name, _ in items)           # referred 3 days ago: fine
+    assert [a["days"] for a in work["attention"]] == sorted((a["days"] for a in work["attention"]), reverse=True)
+
+    # Acting on it clears it.
+    lata = next(p for p in work["patients"] if p["display_name"] == "Lata Wagh")
+    for f in lata["flags"]:
+        api.post(f"/v1/orgs/{org['id']}/patients/{lata['patient_ref']}/referrals", headers=staff,
+                 json={"rule_id": f["rule_id"], "status": "referred"})
+    work = api.get(f"/v1/orgs/{org['id']}/patients", headers=staff).json()
+    assert not any(a["display_name"] == "Lata Wagh" for a in work["attention"])
+
+
+def test_stuck_referral_counts():
+    from datetime import datetime, timedelta, timezone
+    now = datetime(2026, 12, 1, tzinfo=timezone.utc)
+    ago = lambda d: (now - timedelta(days=d)).isoformat()  # noqa: E731
+    refs = [{"status": "referred", "updated_at": ago(15)}, {"status": "referred", "updated_at": ago(5)},
+            {"status": "scheduled", "updated_at": ago(31)}, {"status": "completed", "updated_at": ago(90)}]
+    assert clinic.stuck_referrals(refs, now) == {"referred_no_update_14_days": 1, "scheduled_not_done_30_days": 1}

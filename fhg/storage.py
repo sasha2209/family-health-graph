@@ -560,6 +560,19 @@ class Store:
                            "FROM organizations o WHERE o.practice = 1 ORDER BY o.created_at")
         return [dict(r) for r in rows]
 
+    def backdate_practice(self, org_id: str, user_id: str, days: int) -> None:
+        """Make a practice patient look as if they connected, and their referrals last changed, ``days`` ago."""
+        at = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        with self._lock, self._conn:
+            if not self._conn.execute("SELECT practice FROM organizations WHERE id = ?", (org_id,)).fetchone()["practice"]:
+                raise ValueError("Only a practice clinic's patients can be backdated")
+            self._conn.execute("UPDATE org_patients SET connected_at = ? WHERE org_id = ? AND user_id = ?",
+                               (at, org_id, user_id))
+            self._conn.execute("UPDATE referral_events SET at = ? WHERE referral_id IN "
+                               "(SELECT id FROM referrals WHERE org_id = ? AND user_id = ?)", (at, org_id, user_id))
+            self._conn.execute("UPDATE referrals SET created_at = ?, updated_at = ? WHERE org_id = ? AND user_id = ?",
+                               (at, at, org_id, user_id))
+
     def delete_practice_org(self, org_id: str) -> int:
         """Deletes a practice clinic and its made-up patients (never a real account). Returns patients deleted."""
         with self._lock, self._conn:

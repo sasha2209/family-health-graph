@@ -302,7 +302,8 @@
       <h3 style="font-size:14px;margin:16px 0 6px">Follow-through</h3>
       ${table([['Tests booked', tst.booked], ['Tests completed', tst.completed], ['Completion rate', pct(tst.completion_rate_percent)],
         ['Median days from booking to result', tst.median_days_to_result], ['Referrals made by clinics', ref.made],
-        ['Referrals scheduled', ref.scheduled], ['Referrals completed', ref.completed], ['Referrals declined', ref.declined]])}
+        ['Referrals scheduled', ref.scheduled], ['Referrals completed', ref.completed], ['Referrals declined', ref.declined],
+        ['Referred, no update for 14+ days', ref.referred_no_update_14_days], ['Scheduled, not done after 30+ days', ref.scheduled_not_done_30_days]])}
       <h3 style="font-size:14px;margin:16px 0 6px">Caregiving</h3>
       ${table([['People with medicine reminders', cg.people_with_reminders], ['Doses scheduled (28 days)', cg.doses_scheduled_28d],
         ['Doses marked taken', cg.doses_taken_28d], ['Doses taken', pct(cg.adherence_percent)]])}

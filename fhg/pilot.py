@@ -17,6 +17,7 @@ from statistics import median
 from typing import Optional
 
 from .care import doses_for_day
+from .clinic import stuck_referrals
 from .insights import generate_insights
 from .models import Level
 
@@ -118,7 +119,7 @@ def report(store, now: Optional[datetime] = None) -> dict:
                   "completion_rate_percent": _pct(len(done), len(bookings)),
                   "median_days_to_result": median(days_to_result) if days_to_result else None},
         "referrals": {"made": len(referrals), "scheduled": ref_status["scheduled"], "completed": ref_status["completed"],
-                      "declined": ref_status["declined"]},
+                      "declined": ref_status["declined"], **stuck_referrals(referrals, now)},
         "caregiving": {"people_with_reminders": len(circles), "doses_scheduled_28d": scheduled, "doses_taken_28d": taken,
                        "adherence_percent": _pct(taken, scheduled)},
         "survey": survey,
