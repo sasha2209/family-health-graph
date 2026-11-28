@@ -91,13 +91,15 @@
   </section>
 
   <section id="dash" class="hidden" style="display:grid; gap:14px">
+    <div id="practice-banner" class="card hidden" role="note" style="background:var(--mod-bg); color:var(--mod); border-color:transparent">
+      <b>Practice clinic.</b> These patients are made up, for training. Try anything: open a summary, set a referral,
+      watch the funnel. Nothing here reaches a real patient or partner.</div>
     <div class="tiles" id="tiles"></div>
     <div class="split">
       <div class="card">
         <div class="row" style="justify-content:space-between; margin-bottom:8px">
           <h2 style="margin:0">Patient worklist</h2>
-          <div class="row"><select id="filter" aria-label="Filter by program"><option value="">All programs</option></select>
-            <button id="demo-patients">Load demo patients</button></div>
+          <div class="row"><select id="filter" aria-label="Filter by program"><option value="">All programs</option></select></div>
         </div>
         <div class="table-wrap"><table>
           <thead><tr><th>Patient</th><th>Priority</th><th>May qualify for</th><th>Record</th><th></th></tr></thead>
@@ -182,6 +184,7 @@ async function loadOrg() {
   $("staff-guide").href = `/c/${encodeURIComponent(org.patient_code)}/staff-guide`;
   show("staff-box", !!org.staff_code); $("staff-code-out").textContent = org.staff_code || "";
   show("lang-box", org.role === "admin"); $("org-lang").value = org.lang || "hi";
+  show("practice-banner", !!org.practice);
   $("tiles").innerHTML = [
     [im.patients_connected, "Patients connected"],
     [im.patients_with_high_priority, "Worth discussing soon"],
@@ -216,7 +219,7 @@ function renderRows() {
         </select>${x.partner && x.referral !== "referred" ? `<span class="muted" style="font-size:12px">via ${esc(x.partner)}</span>` : ""}</div>`).join("") || '<span class="muted">—</span>'}</td>
       <td><span class="meter"><span style="width:${p.completeness}%"></span></span><span class="muted">${p.completeness}%</span></td>
       <td class="act"><button data-ref="${esc(p.patient_ref)}">Summary</button></td>
-    </tr>`).join("") : `<tr><td colspan="5" class="muted">${data.patients.length ? "No patients in this program." : "No patients connected yet. Share your patient code, or load demo patients."}</td></tr>`;
+    </tr>`).join("") : `<tr><td colspan="5" class="muted">${data.patients.length ? "No patients in this program." : "No patients connected yet. Share the intake link or patient code. To practise first, ask the pilot coordinator for a practice clinic."}</td></tr>`;
   document.querySelectorAll("select[data-rule]").forEach((sel) => sel.onchange = async () => {
     sel.disabled = true;
     // "referred|<partner id>" routes to a partner; plain "referred" keeps it in-house.
@@ -233,31 +236,6 @@ function renderRows() {
     window.open(URL.createObjectURL(new Blob([html], { type: "text/html" })), "_blank", "noopener");
   });
 }
-
-// Demo patients: real accounts created through the public API, connected with the patient code.
-const DEMO = [
-  { name: "Priya Shah", fhir: true },
-  { name: "Sam Ortiz", sex: "male", dob: "1987-09-14", text: "My father had colon cancer at 44. My grandfather on my father's side had stomach cancer at 70. My mother is healthy." },
-  { name: "Dana Kim", sex: "female", dob: "1979-02-03", text: "My sister has familial hypercholesterolemia. My father had a heart attack at 48. My mother has high blood pressure." },
-  { name: "Alex Rivera", sex: "male", dob: "1970-06-21", text: "My father had prostate cancer at 62. My brother had prostate cancer at 58. My mother had breast cancer at 71." },
-  { name: "Maria Lopez", sex: "female", dob: "1992-11-30", text: "My cousin had a bad reaction to anesthesia during surgery. My mother has type 2 diabetes." },
-  { name: "Lee Brown", sex: "male", dob: "1995-04-08", text: "My dad has high blood pressure. My mom is healthy." },
-];
-$("demo-patients").onclick = async () => {
-  $("demo-patients").disabled = true; status("Creating demo patients…");
-  try {
-    for (const d of DEMO) {
-      const t = (await api("/v1/users", { method: "POST", body: "{}" }, null)).token;
-      if (d.fhir) await api("/v1/ingest/fhir", { method: "POST", body: JSON.stringify(await (await fetch("/sample/fhir")).json()) }, t);
-      else {
-        await api("/v1/profile/demographics", { method: "PUT", body: JSON.stringify({ sex: d.sex, birth_date: d.dob }) }, t);
-        await api("/v1/ingest/text", { method: "POST", body: JSON.stringify({ text: d.text }) }, t);
-      }
-      await api("/v1/clinics", { method: "POST", body: JSON.stringify({ code: data.org.patient_code, display_name: d.name + " (demo)" }) }, t);
-    }
-    status("Added 6 demo patients."); await loadOrg();
-  } catch (e) { status("Error: " + e.message); } finally { $("demo-patients").disabled = false; }
-};
 
 $("send-code").onclick = async () => {
   try { await api("/v1/auth/email/start", { method: "POST", body: JSON.stringify({ email: $("email").value }) }, null);

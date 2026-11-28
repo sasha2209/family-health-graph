@@ -81,7 +81,7 @@ def report(store, now: Optional[datetime] = None) -> dict:
     done = [b for b in bookings if b["status"] in ("completed", "completed_elsewhere")]
     days_to_result = [(datetime.fromisoformat(b["updated_at"]) - datetime.fromisoformat(b["created_at"])).days
                       for b in bookings if b["status"] == "completed"]
-    referrals = store.all_referrals()
+    referrals = [r for r in store.all_referrals() if r["user_id"] in profiles]   # not practice patients
     ref_status = Counter(r["status"] for r in referrals)
 
     # Caregiving: are reminders being acted on?

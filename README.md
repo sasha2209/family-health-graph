@@ -9,7 +9,7 @@ cardiovascular risk checks.
 > usually incomplete, scattered across relatives' memories, and missing from the EHR. This
 > project turns it into structured data that can drive action.
 
-**Clinic portal (B2B):** open `/portal` for the clinician worklist, impact dashboard and demo patients; see [docs/B2B_AND_FUNDING.md](docs/B2B_AND_FUNDING.md).
+**Clinic portal (B2B):** open `/portal` for the clinician worklist, impact dashboard and referrals (practise on a practice clinic from the console); see [docs/B2B_AND_FUNDING.md](docs/B2B_AND_FUNDING.md).
 
 For how this grows through partnerships with existing companies, see
 **[docs/PARTNERSHIP_STRATEGY.md](docs/PARTNERSHIP_STRATEGY.md)**. For the path to iOS and
@@ -152,6 +152,7 @@ Design principles:
 | `GET /v1/referral-partners` | Staff: partners a clinic can refer to |
 | `GET /v1/partner/referrals` · `GET /v1/partner/referrals/{id}` · `…/{id}/summary` · `POST …/{id}/status` | **Partner API** (`X-API-Key`): referrals routed to you as FHIR `ServiceRequest`s, the clinician summary, and outcome reporting. See [docs/PARTNER_API.md](docs/PARTNER_API.md) |
 | `POST /admin/partners` · `GET /admin/partners` · `POST /admin/partners/{id}/deactivate` | Operator (`X-Admin-Key`): onboard referral partners (returns API key and webhook secret once) |
+| `POST /admin/practice-clinics` · `GET /admin/practice-clinics` · `DELETE /admin/practice-clinics/{id}` | Operator: a clinic of made-up families for staff training ([fhg/practice.py](fhg/practice.py)), kept out of the pilot report; real patients can't join it and its referrals never reach partners |
 | `GET /v1/referrals` | Patient: referrals your clinics have made for you |
 | `GET /c/{code}` · `GET /c/{code}/qr.svg` · `GET /c/{code}/poster` | Clinic **pre-visit intake link**: a no-install web intake, its QR code, and a printable waiting-room poster |
 | `GET /v1/public/clinics/{code}` | Public: a clinic's name from its patient code (for the intake page) |

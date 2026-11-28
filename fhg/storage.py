@@ -434,6 +434,8 @@ class Store:
         self._add_column_if_missing("partners", "catalog", "TEXT")
         self._add_column_if_missing("users", "lang", "TEXT")
         self._add_column_if_missing("organizations", "lang", "TEXT")
+        self._add_column_if_missing("organizations", "practice", "INTEGER NOT NULL DEFAULT 0")
+        self._add_column_if_missing("users", "practice", "INTEGER NOT NULL DEFAULT 0")
 
     def _add_column_if_missing(self, table: str, column: str, decl: str) -> None:
         cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
@@ -545,6 +547,31 @@ class Store:
     def org(self, org_id: str) -> Optional[dict]:
         rows = self._query("SELECT * FROM organizations WHERE id = ?", (org_id,))
         return dict(rows[0]) if rows else None
+
+    # --- practice clinics (staff training; made-up patients) ---------------------------------
+    def mark_practice(self, org_id: str, user_ids: list[str]) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE organizations SET practice = 1 WHERE id = ?", (org_id,))
+            self._conn.executemany("UPDATE users SET practice = 1 WHERE id = ?", [(u,) for u in user_ids])
+
+    def practice_orgs(self) -> list[dict]:
+        rows = self._query("SELECT o.*, (SELECT COUNT(*) FROM org_patients p WHERE p.org_id = o.id) AS patients, "
+                           "(SELECT COUNT(*) FROM org_staff s WHERE s.org_id = o.id) AS staff "
+                           "FROM organizations o WHERE o.practice = 1 ORDER BY o.created_at")
+        return [dict(r) for r in rows]
+
+    def delete_practice_org(self, org_id: str) -> int:
+        """Deletes a practice clinic and its made-up patients (never a real account). Returns patients deleted."""
+        with self._lock, self._conn:
+            org = self._conn.execute("SELECT practice FROM organizations WHERE id = ?", (org_id,)).fetchone()
+            if org is None or not org["practice"]:
+                return -1
+            users = [r["user_id"] for r in self._conn.execute(
+                "SELECT p.user_id FROM org_patients p JOIN users u ON u.id = p.user_id "
+                "WHERE p.org_id = ? AND u.practice = 1", (org_id,))]
+            self._conn.executemany("DELETE FROM users WHERE id = ? AND practice = 1", [(u,) for u in users])
+            self._conn.execute("DELETE FROM organizations WHERE id = ? AND practice = 1", (org_id,))
+        return len(users)
 
     def set_org_lang(self, org_id: str, lang: str) -> None:
         """The second language (after English) on the clinic's poster, staff guide and intake page."""
@@ -750,7 +777,7 @@ class Store:
     def users_overview(self) -> list[dict]:
         """Per account: when it was created and last used. For pilot metrics only."""
         rows = self._query("SELECT u.id, u.created_at, MAX(s.last_used_at) AS last_seen FROM users u "
-                           "LEFT JOIN sessions s ON s.user_id = u.id GROUP BY u.id")
+                           "LEFT JOIN sessions s ON s.user_id = u.id WHERE u.practice = 0 GROUP BY u.id")
         return [dict(r) for r in rows]
 
     def all_bookings(self) -> list[dict]:
@@ -770,13 +797,14 @@ class Store:
     def counts(self) -> dict:
         one = lambda sql, *p: self._query(sql, p)[0][0]  # noqa: E731
         return {
-            "users": one("SELECT COUNT(*) FROM users"),
+            "users": one("SELECT COUNT(*) FROM users WHERE practice = 0"),
             "documents": one("SELECT COUNT(*) FROM documents"),
             "care_circles": one("SELECT COUNT(DISTINCT owner_id || member_id) FROM care_circle"),
             "caregivers": one("SELECT COUNT(*) FROM care_circle"),
             "doses_logged_7d": one("SELECT COUNT(*) FROM dose_log WHERE at >= ?",
                                    (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()),
-            "clinics": one("SELECT COUNT(*) FROM organizations"),
+            "clinics": one("SELECT COUNT(*) FROM organizations WHERE practice = 0"),
+            "practice_clinics": one("SELECT COUNT(*) FROM organizations WHERE practice = 1"),
             "partners_active": one("SELECT COUNT(*) FROM partners WHERE active = 1"),
             "grievances_open": one("SELECT COUNT(*) FROM grievances WHERE status = 'open'"),
             "grievances_overdue": one("SELECT COUNT(*) FROM grievances WHERE status = 'open' AND due_at < ?", _now()),
