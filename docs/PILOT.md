@@ -55,7 +55,9 @@ Write down one thing to change for next week.
   guide says so.
 - **Using pilot results as research:** to publish outcomes, get approval from an Institutional Ethics Committee
   under the ICMR National Ethical Guidelines before the pilot starts, and use the committee's participant
-  information and consent wording. The clinic's own committee, or one the partner hospital uses, is usually the
+  information and consent wording. [ETHICS.md](ETHICS.md) has the submission pack, the consent process, and how the
+  app then takes versioned consent and counts only participants (`FHG_STUDY=on`). A draft information sheet and
+  consent form in English, Hindi and Marathi is printable at `/study`. The clinic's own committee, or one the partner hospital uses, is usually the
   fastest route. Ask it whether registration with the Clinical Trials Registry of India applies to the design.
 - **Survey answers** are optional and reported only as counts. The shareable report hides any count below 5.
 - **Clinic agreement:** agree in writing what the clinic receives (the patients who connected, their summaries and

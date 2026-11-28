@@ -4,6 +4,7 @@ import type { Lang } from './translate';
 
 import type {
   AcceptResult,
+  Study,
   AppNotification,
   AuthConfig,
   DeviceSession,
@@ -156,6 +157,10 @@ export function createApi(token: string | null) {
     setLanguage: (lang: string) => authed<{ lang: string }>('/v1/profile/language', { method: 'PUT', body: { lang } }),
     care: () => authed<CareSummary[]>('/v1/care'),
     surveys: () => authed<{ id: string; text: string; options: string[] }[]>('/v1/surveys'),
+    study: (lang?: string) => authed<Study>(`/v1/study${lang ? `?lang=${encodeURIComponent(lang)}` : ''}`),
+    studyConsent: (version: string) => authed<Study>('/v1/study/consent', { method: 'POST', body: { version, agreed: true } }),
+    studyDecline: () => authed<Study>('/v1/study/decline', { method: 'POST' }),
+    studyWithdraw: () => authed<Study>('/v1/study/consent', { method: 'DELETE' }),
     answerSurvey: (id: string, answer: string) =>
       authed<void>(`/v1/surveys/${encodeURIComponent(id)}`, { method: 'POST', body: { answer } }),
     careDetail: (id: string) => authed<CareDetail>(`/v1/care/${encodeURIComponent(id)}`),

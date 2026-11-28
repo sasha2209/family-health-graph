@@ -436,6 +436,7 @@ class Store:
         self._add_column_if_missing("organizations", "lang", "TEXT")
         self._add_column_if_missing("organizations", "practice", "INTEGER NOT NULL DEFAULT 0")
         self._add_column_if_missing("users", "practice", "INTEGER NOT NULL DEFAULT 0")
+        self._add_column_if_missing("consents", "version", "TEXT")   # which wording was agreed to (pilot study)
 
     def _add_column_if_missing(self, table: str, column: str, decl: str) -> None:
         cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
@@ -1315,20 +1316,40 @@ class Store:
                  "summary": json.loads(r["summary"]), "received_at": r["received_at"]} for r in rows]
 
     # --- consent -----------------------------------------------------------
-    def set_consent(self, user_id: str, scope: str, granted: bool) -> None:
+    def set_consent(self, user_id: str, scope: str, granted: bool, version: Optional[str] = None) -> None:
         now = _now()
         with self._lock, self._conn:
             if granted:
                 self._conn.execute(
-                    "INSERT INTO consents (user_id, scope, granted_at, revoked_at) VALUES (?, ?, ?, NULL) "
-                    "ON CONFLICT(user_id, scope) DO UPDATE SET granted_at = excluded.granted_at, revoked_at = NULL",
-                    (user_id, scope, now),
+                    "INSERT INTO consents (user_id, scope, granted_at, revoked_at, version) VALUES (?, ?, ?, NULL, ?) "
+                    "ON CONFLICT(user_id, scope) DO UPDATE SET granted_at = excluded.granted_at, revoked_at = NULL, "
+                    "version = excluded.version",
+                    (user_id, scope, now, version),
                 )
             else:
                 self._conn.execute(
                     "UPDATE consents SET revoked_at = ? WHERE user_id = ? AND scope = ?",
                     (now, user_id, scope),
                 )
+
+    def decline_consent(self, user_id: str, scope: str) -> None:
+        """Record "not now" for something offered once (the pilot study), so it isn't offered again."""
+        with self._lock, self._conn:
+            self._conn.execute("INSERT OR IGNORE INTO consents (user_id, scope, granted_at, revoked_at) "
+                               "VALUES (?, ?, NULL, ?)", (user_id, scope, _now()))
+
+    def consent_row(self, user_id: str, scope: str) -> Optional[dict]:
+        rows = self._query("SELECT scope, granted_at, revoked_at, version FROM consents WHERE user_id = ? AND scope = ?",
+                           (user_id, scope))
+        return dict(rows[0]) if rows else None
+
+    def consent_counts(self, scope: str) -> dict:
+        """Across real accounts: active, withdrawn (agreed, then stopped) and declined."""
+        one = lambda where: self._query(  # noqa: E731
+            f"SELECT COUNT(*) FROM consents c JOIN users u ON u.id = c.user_id WHERE c.scope = ? AND u.practice = 0 "
+            f"AND {where}", (scope,))[0][0]
+        return {"active": one("c.revoked_at IS NULL"), "withdrawn": one("c.revoked_at IS NOT NULL AND c.granted_at IS NOT NULL"),
+                "declined": one("c.granted_at IS NULL")}
 
     def consents(self, user_id: str) -> list[dict]:
         rows = self._query("SELECT scope, granted_at, revoked_at FROM consents WHERE user_id = ? ORDER BY scope", (user_id,))

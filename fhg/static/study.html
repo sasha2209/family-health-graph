@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pilot Study</title>
+<style>
+  @page { size: A4; margin: 16mm; }
+  body { margin: 0; background: #fff; color: #1d1d1b; font: 15px/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .page { max-width: 740px; margin: 0 auto; padding: 24px 20px 40px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  .langs { display: flex; gap: 6px; }
+  button { font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid #ccc; background: #fff; color: #1d1d1b; cursor: pointer; }
+  button[aria-pressed="true"] { background: #2f6f62; border-color: #2f6f62; color: #fff; }
+  .eyebrow { font-size: 12px; font-weight: 700; color: #2f6f62; text-transform: uppercase; letter-spacing: .06em; }
+  h1 { font-size: 24px; line-height: 1.25; margin: 4px 0 8px; }
+  h2 { font-size: 16px; margin: 18px 0 4px; color: #2f6f62; }
+  p { margin: 0 0 8px; }
+  .lede { color: #444; }
+  .form { margin-top: 26px; border: 1px solid #d8d7d0; border-radius: 10px; padding: 14px 16px; break-inside: avoid; }
+  .form ol { padding-left: 20px; margin: 8px 0 14px; } .form li { margin: 6px 0; }
+  .box { display: inline-block; width: 14px; height: 14px; border: 1.5px solid #555; border-radius: 3px; vertical-align: -2px; margin-right: 6px; }
+  .sign { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px 24px; margin-top: 14px; font-size: 13px; color: #555; }
+  .sign div { border-top: 1px solid #888; padding-top: 4px; min-height: 34px; }
+  .contacts { font-size: 14px; } .contacts b { color: #555; }
+  .meta { margin-top: 18px; font-size: 12px; color: #666; }
+  .draft { background: #fbf3e2; color: #8a5d0d; border-radius: 8px; padding: 8px 12px; font-size: 13px; margin-bottom: 12px; }
+  @media (max-width: 600px) { .sign { grid-template-columns: minmax(0, 1fr); } }
+  @media print { .bar { display: none; } h2 { break-after: avoid; } }
+</style>
+</head>
+<body>
+<main class="page">
+  <div class="bar">
+    <div class="langs" id="langs" role="group" aria-label="Language"></div>
+    <button onclick="window.print()">Print</button>
+  </div>
+  <div id="draft" class="draft" hidden></div>
+  <div class="eyebrow" id="eyebrow">Participant information sheet</div>
+  <h1 id="title"></h1>
+  <p class="lede" id="summary"></p>
+  <div id="sections"></div>
+  <h2 id="contact-heading"></h2>
+  <div class="contacts" id="contacts"></div>
+
+  <section class="form">
+    <div class="eyebrow" id="form-eyebrow">Informed consent form</div>
+    <ol id="statements"></ol>
+    <div class="sign">
+      <div id="s-name">Participant's name</div><div id="s-sign">Signature or thumb impression, and date</div>
+      <div id="s-witness">Impartial witness (if the participant cannot read)</div><div id="s-staff">Person taking consent, and date</div>
+    </div>
+  </section>
+  <p class="meta" id="meta"></p>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const NAMES = { en: "English", hi: "हिन्दी", mr: "मराठी" };
+// Paper form labels; the information itself comes from the server (fhg/study.py).
+const FORM = {
+  en: { info: "Participant information sheet", form: "Informed consent form", name: "Participant's name",
+        sign: "Signature or thumb impression, and date", witness: "Impartial witness (if the participant cannot read)",
+        staff: "Person taking consent, and date",
+        draft: "Draft wording for the ethics committee. Replace it with the approved version before anyone is asked to take part." },
+  hi: { info: "प्रतिभागी सूचना पत्र", form: "सूचित सहमति पत्र", name: "प्रतिभागी का नाम", sign: "हस्ताक्षर या अँगूठे का निशान, और तारीख",
+        witness: "निष्पक्ष गवाह (अगर प्रतिभागी पढ़ नहीं सकते)", staff: "सहमति लेने वाले व्यक्ति, और तारीख",
+        draft: "आचार समिति के लिए मसौदा। किसी से भाग लेने को कहने से पहले इसे स्वीकृत संस्करण से बदलें।" },
+  mr: { info: "सहभागी माहिती पत्रक", form: "माहितीपूर्ण संमती पत्र", name: "सहभागीचे नाव", sign: "सही किंवा अंगठ्याचा ठसा, आणि तारीख",
+        witness: "निष्पक्ष साक्षीदार (सहभागी वाचू शकत नसल्यास)", staff: "संमती घेणारी व्यक्ती, आणि तारीख",
+        draft: "नैतिकता समितीसाठी मसुदा. कोणालाही सहभागी होण्यास सांगण्यापूर्वी तो मंजूर आवृत्तीने बदला." },
+};
+let lang = new URLSearchParams(location.search).get("lang") || "en";
+if (!(lang in NAMES)) lang = "en";
+
+async function load() {
+  const s = await (await fetch(`/v1/public/study?lang=${lang}`)).json();
+  const f = FORM[s.lang];
+  document.documentElement.lang = s.lang;
+  document.title = s.title;
+  $("langs").innerHTML = s.available_languages.map((l) =>
+    `<button data-lang="${l}" lang="${l}" aria-pressed="${l === s.lang}">${NAMES[l]}</button>`).join("");
+  $("eyebrow").textContent = f.info; $("form-eyebrow").textContent = f.form;
+  $("title").textContent = s.title; $("summary").textContent = s.summary;
+  $("sections").innerHTML = s.sections.map((x) => `<h2>${esc(x.heading)}</h2><p>${esc(x.text)}</p>`).join("");
+  $("contact-heading").textContent = s.contact_heading;
+  // Contacts come from the server's settings; blank lines to fill in by hand until they're set.
+  $("contacts").innerHTML = s.contacts.map((c) => `<p><b>${esc(c.role)}:</b> ${
+    c.name || c.contact ? esc([c.name, c.contact].filter(Boolean).join(", ")) : "________________________________"}</p>`).join("");
+  $("statements").innerHTML = s.statements.map((x) => `<li><span class="box"></span>${esc(x)}</li>`).join("");
+  $("s-name").textContent = f.name; $("s-sign").textContent = f.sign; $("s-witness").textContent = f.witness; $("s-staff").textContent = f.staff;
+  $("meta").textContent = `${s.version_label}: ${s.version}`;
+  const draft = s.version.startsWith("draft");
+  $("draft").hidden = !draft; $("draft").textContent = f.draft;
+}
+$("langs").onclick = (e) => {
+  const b = e.target.closest("[data-lang]"); if (!b) return;
+  lang = b.dataset.lang; history.replaceState(null, "", `?lang=${lang}`); load();
+};
+load();
+</script>
+</body>
+</html>

@@ -45,9 +45,10 @@ export default function SettingsScreen() {
   const { api, signOut } = useSession();
   const lock = useAppLock();
   const { data, error, reload } = useLoader(async () => {
-    const [profile, consents, me, sessions, pushState, clinics, grants] = await Promise.all([
-      api.profile(false), api.consents(), api.me(), api.sessions(), api.pushStatus(), api.clinics(), api.grants()]);
-    return { profile, me, sessions, clinics, grants, push: pushState.registered,
+    const [profile, consents, me, sessions, pushState, clinics, grants, study] = await Promise.all([
+      api.profile(false), api.consents(), api.me(), api.sessions(), api.pushStatus(), api.clinics(), api.grants(),
+      api.study().catch(() => null)]);
+    return { profile, me, sessions, clinics, grants, push: pushState.registered, studyOn: !!study?.enabled,
              ai: consents.consents.some((x) => x.scope === AI_SCOPE && x.active),
              aiDocs: consents.consents.some((x) => x.scope === AI_DOCS_SCOPE && x.active),
              wa: consents.consents.some((x) => x.scope === WA_SCOPE && x.active) };
@@ -58,7 +59,7 @@ export default function SettingsScreen() {
   const [msg, setMsg] = useState<string | null>(null);
 
   if (!data) return <Screen>{error ? <ErrorText>{error}</ErrorText> : <Loading />}</Screen>;
-  const { profile, ai, aiDocs, wa, me, sessions, push, clinics, grants } = data;
+  const { profile, ai, aiDocs, wa, me, sessions, push, clinics, grants, studyOn } = data;
   const support = pushSupport();
   const birthValue = birth ?? profile.birth_date ?? '';
 
@@ -267,6 +268,7 @@ export default function SettingsScreen() {
         </View>
         <View style={styles.row}>
           <Button title={t('Your privacy rights')} variant="primary" onPress={() => router.push('/privacy')} />
+          {studyOn && <Button title={t('Pilot study')} onPress={() => router.push('/study')} />}
           <Button title={t('Export my data (FHIR)')} onPress={async () => {
             const bundle = await api.exportFhir();
             await Share.share({ title: t('My health record (FHIR)'), message: JSON.stringify(bundle, null, 2) });
